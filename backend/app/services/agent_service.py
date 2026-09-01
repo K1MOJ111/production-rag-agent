@@ -150,8 +150,10 @@ class LangGraphAgentService:
         )
         return output
 
-    def list_audit(self, actor_id: str, thread_id: str) -> list[dict]:
-        self._require_owner(actor_id, thread_id)
+    def list_audit(
+        self, actor_id: str, thread_id: str, allow_other: bool = False
+    ) -> list[dict]:
+        self._require_owner(actor_id, thread_id, allow_other)
         if not self._audit_engine:
             return [
                 entry for entry in self._audit_entries
@@ -161,7 +163,7 @@ class LangGraphAgentService:
             rows = connection.execute(
                 text(
                     """
-                    SELECT event_id, thread_id, event_type, status, used_tools,
+                    SELECT event_id, thread_id, actor_id, event_type, status, used_tools,
                            details, created_at
                     FROM agent_audit_events
                     WHERE thread_id = :thread_id
@@ -243,7 +245,9 @@ class LangGraphAgentService:
         if owner != actor_id:
             raise PermissionError("thread belongs to another actor")
 
-    def _require_owner(self, actor_id: str, thread_id: str) -> None:
+    def _require_owner(
+        self, actor_id: str, thread_id: str, allow_other: bool = False
+    ) -> None:
         if not self._audit_engine:
             owner = self._thread_actors.get(thread_id)
         else:
@@ -254,7 +258,7 @@ class LangGraphAgentService:
                 ).scalar_one_or_none()
         if owner is None:
             raise ValueError("thread not found")
-        if owner != actor_id:
+        if not allow_other and owner != actor_id:
             raise PermissionError("thread belongs to another actor")
 
     def _record_audit(
@@ -271,6 +275,7 @@ class LangGraphAgentService:
         entry = {
             "event_id": len(self._audit_entries) + 1,
             "thread_id": thread_id,
+            "actor_id": actor_id,
             "event_type": event_type,
             "status": output["status"],
             "used_tools": output.get("used_tools", []),

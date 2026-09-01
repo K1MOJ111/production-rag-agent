@@ -5,7 +5,8 @@ from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
 from .models import (
     AskRequest,
@@ -18,6 +19,7 @@ from .models import (
     DocumentInfo,
     LoadSamplesResponse,
     TextUploadRequest,
+    TokenResponse,
     UploadResponse,
 )
 from .config import Settings
@@ -26,10 +28,19 @@ from .services.mock_embedding_service import MockEmbeddingService
 from .services.mock_llm_service import MockLLMService
 from .services.prompt_service import build_prompt, has_valid_citations
 from .services.vector_store import InMemoryVectorStore
+from .services.auth_service import AuthService, Principal, ROLES
 
 
 logger = logging.getLogger("uvicorn.error")
 settings = Settings.from_env()
+auth_service = AuthService(
+    settings.database_url if settings.rag_mode == "real" else None,
+    settings.jwt_secret,
+    settings.jwt_issuer,
+    settings.jwt_audience,
+    settings.jwt_expire_minutes,
+)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 if settings.rag_mode == "real":
     from .services.dashscope_embedding_service import DashScopeEmbeddingService
     from .services.deepseek_llm_service import DeepSeekLLMService
@@ -103,12 +114,13 @@ async def lifespan(app: FastAPI):
     close = getattr(store, "close", None)
     if close:
         await close()
+    auth_service.close()
 
 
 app = FastAPI(
     title="RAG Demo API",
     description="Enterprise knowledge base API with mock and real RAG modes.",
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan,
 )
 
@@ -161,8 +173,45 @@ def ready() -> dict:
     }
 
 
+def get_current_principal(token: str = Depends(oauth2_scheme)) -> Principal:
+    try:
+        return auth_service.get_principal(token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+
+def require_role(principal: Principal, minimum: str) -> None:
+    if ROLES[principal.role] < ROLES[minimum]:
+        raise HTTPException(status_code=403, detail="insufficient permissions")
+
+
+@app.post("/auth/token", response_model=TokenResponse)
+def login(
+    response: Response,
+    form: OAuth2PasswordRequestForm = Depends(),
+) -> TokenResponse:
+    principal = auth_service.authenticate(form.username, form.password)
+    if not principal:
+        raise HTTPException(
+            status_code=401,
+            detail="incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return TokenResponse(access_token=auth_service.create_access_token(principal))
+
+
 @app.post("/documents/upload", response_model=UploadResponse)
-def upload_document(payload: TextUploadRequest) -> UploadResponse:
+def upload_document(
+    payload: TextUploadRequest,
+    principal: Principal = Depends(get_current_principal),
+) -> UploadResponse:
+    require_role(principal, "admin")
     try:
         document = document_service.add_text_document(
             filename=payload.filename,
@@ -182,7 +231,10 @@ def upload_document(payload: TextUploadRequest) -> UploadResponse:
 
 
 @app.post("/documents/load-samples", response_model=LoadSamplesResponse)
-def load_samples() -> LoadSamplesResponse:
+def load_samples(
+    principal: Principal = Depends(get_current_principal),
+) -> LoadSamplesResponse:
+    require_role(principal, "admin")
     sample_dir = Path(__file__).resolve().parents[2] / "sample_docs"
     try:
         documents = document_service.load_sample_documents(sample_dir)
@@ -195,12 +247,19 @@ def load_samples() -> LoadSamplesResponse:
 
 
 @app.get("/documents", response_model=list[DocumentInfo])
-def list_documents() -> list[DocumentInfo]:
+def list_documents(
+    principal: Principal = Depends(get_current_principal),
+) -> list[DocumentInfo]:
+    require_role(principal, "viewer")
     return [DocumentInfo(**document) for document in store.list_documents()]
 
 
 @app.get("/documents/{document_id}/chunks", response_model=list[ChunkInfo])
-def list_document_chunks(document_id: str) -> list[ChunkInfo]:
+def list_document_chunks(
+    document_id: str,
+    principal: Principal = Depends(get_current_principal),
+) -> list[ChunkInfo]:
+    require_role(principal, "viewer")
     chunks = store.get_chunks(document_id)
     if not chunks:
         raise HTTPException(status_code=404, detail="document not found")
@@ -212,7 +271,11 @@ def list_document_chunks(document_id: str) -> list[ChunkInfo]:
 
 
 @app.delete("/documents/{document_id}")
-def delete_document(document_id: str) -> dict:
+def delete_document(
+    document_id: str,
+    principal: Principal = Depends(get_current_principal),
+) -> dict:
+    require_role(principal, "admin")
     deleted = store.delete_document(document_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="document not found")
@@ -221,7 +284,11 @@ def delete_document(document_id: str) -> dict:
 
 
 @app.post("/qa/ask", response_model=AskResponse)
-def ask_question(payload: AskRequest) -> AskResponse:
+def ask_question(
+    payload: AskRequest,
+    principal: Principal = Depends(get_current_principal),
+) -> AskResponse:
+    require_role(principal, "viewer")
     try:
         raw_sources = store.search(
             question=payload.question,
@@ -274,13 +341,14 @@ def ask_question(payload: AskRequest) -> AskResponse:
 @app.post("/agent/run", response_model=AgentResponse)
 def run_agent(
     payload: AgentRunRequest,
-    actor_id: str = Header(..., alias="X-Actor-Id", min_length=1, max_length=128),
+    principal: Principal = Depends(get_current_principal),
 ) -> AgentResponse:
+    require_role(principal, "operator")
     if not agent_service:
         raise HTTPException(status_code=503, detail="agent requires real mode")
     try:
         return AgentResponse(
-            **agent_service.run(actor_id, payload.thread_id, payload.message)
+            **agent_service.run(principal.user_id, payload.thread_id, payload.message)
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -293,13 +361,16 @@ def run_agent(
 @app.post("/agent/confirm", response_model=AgentResponse)
 def confirm_agent(
     payload: AgentConfirmRequest,
-    actor_id: str = Header(..., alias="X-Actor-Id", min_length=1, max_length=128),
+    principal: Principal = Depends(get_current_principal),
 ) -> AgentResponse:
+    require_role(principal, "operator")
     if not agent_service:
         raise HTTPException(status_code=503, detail="agent requires real mode")
     try:
         return AgentResponse(
-            **agent_service.confirm(actor_id, payload.thread_id, payload.approved)
+            **agent_service.confirm(
+                principal.user_id, payload.thread_id, payload.approved
+            )
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -312,14 +383,19 @@ def confirm_agent(
 @app.get("/agent/{thread_id}/audit", response_model=list[AgentAuditEntry])
 def get_agent_audit(
     thread_id: str,
-    actor_id: str = Header(..., alias="X-Actor-Id", min_length=1, max_length=128),
+    principal: Principal = Depends(get_current_principal),
 ) -> list[AgentAuditEntry]:
+    require_role(principal, "operator")
     if not agent_service:
         raise HTTPException(status_code=503, detail="agent requires real mode")
     try:
         return [
             AgentAuditEntry(**entry)
-            for entry in agent_service.list_audit(actor_id, thread_id)
+            for entry in agent_service.list_audit(
+                principal.user_id,
+                thread_id,
+                allow_other=principal.role == "admin",
+            )
         ]
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

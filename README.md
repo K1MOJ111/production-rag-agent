@@ -10,8 +10,9 @@
 - **M3 已完成**：单个 LangGraph Agent 可编排知识检索、演示订单/库存查询和需人工确认的取消草稿。
 - **M4 已完成**：Agent 检查点持久化到 PostgreSQL，并增加线程归属约束和最小审计查询。
 - **M5 已完成**：已加入请求 ID、结构化耗时日志、数据库就绪检查和非 root Docker 部署验证。
+- **M6 已完成**：PostgreSQL 本地用户、Argon2id 密码哈希、短期 Bearer JWT 和 viewer/operator/admin 权限已接入。
 - 默认 `RAG_MODE=mock`，仍可零费用运行；只有显式切换到 `real` 才连接数据库和模型 API。
-- 当前 Agent 仍使用演示业务数据；`X-Actor-Id` 只接收上游身份并做线程隔离，不等于登录认证。当前只有本地结构化日志和容器部署验证，不能表述为已接入真实订单系统或已生产部署。
+- 当前 Agent 仍使用演示业务数据；JWT `sub` 已替代调用方自报身份，但当前只有本地账号体系、结构化日志和容器部署验证，不能表述为已接入企业登录、真实订单系统或已生产部署。
 
 ```text
 上传或读取文档
@@ -119,11 +120,11 @@ cd backend
 python -m unittest discover -s tests -v
 ```
 
-测试固定当前健康检查、文档加载、已知问题检索、低相关拒答、请求校验和切块重叠行为。测试只使用 Mock，不调用付费 API。
+测试固定当前健康检查、JWT/RBAC、文档加载、已知问题检索、低相关拒答、请求校验和切块重叠行为。普通测试只使用 Mock，不调用付费 API。
 
 ## M1 真实模式
 
-复制 `.env.example` 为 `.env`，填写本机 PostgreSQL 连接串、百炼 API Key 和百炼控制台提供的 OpenAI 兼容 `base_url`。不要把 `.env` 提交到 Git。
+复制 `.env.example` 为 `.env`，填写本机 PostgreSQL 连接串、模型 API 配置和至少 32 字节的随机 `JWT_SECRET`。不要把 `.env` 提交到 Git。
 
 ```powershell
 Copy-Item .env.example .env
@@ -148,7 +149,7 @@ cd backend
 
 ## M3 Agent 接口
 
-`POST /agent/run` 接收 `message` 和可选 `thread_id`，返回回答、实际调用的 `used_tools`，或 `needs_confirmation`。`POST /agent/confirm` 用同一 `thread_id` 批准或拒绝草稿。两者都必须带 `X-Actor-Id` 请求头；同一线程不能被其他调用方读取或继续。批准只记录草稿结果，不会执行订单操作。
+`POST /agent/run` 接收 `message` 和可选 `thread_id`，返回回答、实际调用的 `used_tools`，或 `needs_confirmation`。`POST /agent/confirm` 用同一 `thread_id` 批准或拒绝草稿。两者必须使用 operator 或 admin 的 Bearer JWT；线程归属来自 JWT `sub`，其他用户不能读取或继续。批准只记录草稿结果，不会执行订单操作。
 
 `GET /agent/{thread_id}/audit` 返回该调用方的运行/确认状态、工具名和动作元数据。审计不保存完整提问、模型回答或密钥。
 
@@ -177,6 +178,30 @@ docker compose --profile app logs -f app
 
 镜像以非 root 用户运行；真实配置仍从本机 `.env` 注入，不会复制进镜像。
 
+## M6 本地认证与权限
+
+生成随机 JWT 密钥并填入 `.env` 的 `JWT_SECRET`：
+
+```powershell
+[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+```
+
+创建首个管理员；密码通过终端隐藏输入，不进入命令历史：
+
+```powershell
+cd backend
+../.venv/Scripts/python.exe -m dotenv -f ../.env run -- `
+  ../.venv/Scripts/python.exe -m app.create_user admin --role admin
+```
+
+`POST /auth/token` 使用表单字段 `username`、`password` 换取30分钟 Access Token。后续请求携带 `Authorization: Bearer <token>`。
+
+- `viewer`：查看文档、分块并查询知识库。
+- `operator`：继承 viewer，并运行 Agent、确认和查看自己的操作草稿。
+- `admin`：继承全部权限，可上传/删除文档并查看其他用户的指定线程审计。
+
+JWT 只保存用户 ID 和必要标准声明；每次请求仍查询 PostgreSQL 获取最新角色和启用状态。未实现 Refresh Token、开放注册、第三方登录、登录限流或账号锁定，因此公开部署前还需要网关限流和 HTTPS。
+
 ## 后续里程碑
 
 - M1：接入真实 Embedding、LLM 和 PostgreSQL+pgvector。
@@ -184,6 +209,7 @@ docker compose --profile app logs -f app
 - M3：用单个 LangGraph Agent 编排知识检索、订单/库存查询和需人工确认的操作草稿（已完成）。
 - M4：用 PostgreSQL 持久化 Agent 状态，并加入线程归属和最小审计（已完成）。
 - M5：补运行可观测性、就绪检查和部署验证（已完成）。
+- M6：本地用户、Argon2id、Bearer JWT 与三角色权限（已完成）。
 
 `.env.example` 只声明后续阶段需要的变量名；真实密钥必须写入被 Git 忽略的 `.env`。本项目采用 [MIT License](LICENSE)。
 

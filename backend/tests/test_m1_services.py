@@ -34,11 +34,23 @@ class SettingsTest(unittest.TestCase):
                 "DASHSCOPE_API_KEY": "test-key",
                 "DASHSCOPE_BASE_URL": "https://example.com/v1",
                 "DEEPSEEK_API_KEY": "test-key",
+                "JWT_SECRET": "x" * 32,
             }
         )
         self.assertEqual(settings.embedding_dimension, 1024)
         self.assertEqual(settings.rerank_model, "qwen3-rerank")
         self.assertEqual(settings.min_similarity_score, 0.55)
+
+        with self.assertRaisesRegex(ValueError, "JWT_SECRET"):
+            Settings.from_env(
+                {
+                    "RAG_MODE": "real",
+                    "DATABASE_URL": "postgresql+psycopg://example",
+                    "DASHSCOPE_API_KEY": "test-key",
+                    "DASHSCOPE_BASE_URL": "https://example.com/v1",
+                    "DEEPSEEK_API_KEY": "test-key",
+                }
+            )
 
 
 class FakeEmbeddingsApi:

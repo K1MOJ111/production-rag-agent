@@ -3,8 +3,9 @@ import unittest
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
-from app.main import agent_service, app
+from app.main import agent_service, app, auth_service
 
 
 @unittest.skipUnless(
@@ -14,10 +15,44 @@ from app.main import agent_service, app
 class M3RealAgentTest(unittest.TestCase):
     def test_tools_and_confirmation_gate(self) -> None:
         with TestClient(app) as client:
-            headers = {"X-Actor-Id": "m3-real-test"}
+            suffix = uuid4().hex
+            created_users = [
+                (f"m3-operator-{suffix}", "operator"),
+                (f"m3-other-{suffix}", "operator"),
+                (f"m3-admin-{suffix}", "admin"),
+            ]
+            principals = [
+                auth_service.create_user(username, "M3-real-pass-123!", role)
+                for username, role in created_users
+            ]
+
+            def headers(index: int) -> dict[str, str]:
+                response = client.post(
+                    "/auth/token",
+                    data={
+                        "username": created_users[index][0],
+                        "password": "M3-real-pass-123!",
+                    },
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                return {
+                    "Authorization": f"Bearer {response.json()['access_token']}"
+                }
+
+            operator_headers = headers(0)
+            other_headers = headers(1)
+            admin_headers = headers(2)
             thread_ids = []
-            before = {item["document_id"] for item in client.get("/documents").json()}
-            self.assertEqual(client.post("/documents/load-samples").status_code, 200)
+            before = {
+                item["document_id"]
+                for item in client.get("/documents", headers=admin_headers).json()
+            }
+            self.assertEqual(
+                client.post(
+                    "/documents/load-samples", headers=admin_headers
+                ).status_code,
+                200,
+            )
             try:
                 cases = [
                     ("请从知识库查询差旅报销需要什么材料？", "knowledge_search"),
@@ -30,7 +65,7 @@ class M3RealAgentTest(unittest.TestCase):
                     response = client.post(
                         "/agent/run",
                         json={"thread_id": thread_id, "message": message},
-                        headers=headers,
+                        headers=operator_headers,
                     )
                     self.assertEqual(response.status_code, 200, response.text)
                     self.assertEqual(response.json()["status"], "completed")
@@ -44,7 +79,7 @@ class M3RealAgentTest(unittest.TestCase):
                         "thread_id": thread_id,
                         "message": "请生成取消演示订单 ORD-1002 的草稿，原因是用户不再需要。",
                     },
-                    headers=headers,
+                    headers=operator_headers,
                 )
                 self.assertEqual(pending.status_code, 200, pending.text)
                 self.assertEqual(pending.json()["status"], "needs_confirmation")
@@ -53,7 +88,7 @@ class M3RealAgentTest(unittest.TestCase):
                 confirmed = client.post(
                     "/agent/confirm",
                     json={"thread_id": thread_id, "approved": True},
-                    headers=headers,
+                    headers=operator_headers,
                 )
                 self.assertEqual(confirmed.status_code, 200, confirmed.text)
                 self.assertEqual(confirmed.json()["status"], "completed")
@@ -61,7 +96,7 @@ class M3RealAgentTest(unittest.TestCase):
                     "draft_order_cancellation", confirmed.json()["used_tools"]
                 )
                 audit = client.get(
-                    f"/agent/{thread_id}/audit", headers=headers
+                    f"/agent/{thread_id}/audit", headers=operator_headers
                 )
                 self.assertEqual(audit.status_code, 200, audit.text)
                 self.assertEqual(
@@ -70,13 +105,24 @@ class M3RealAgentTest(unittest.TestCase):
                 )
                 forbidden = client.get(
                     f"/agent/{thread_id}/audit",
-                    headers={"X-Actor-Id": "another-actor"},
+                    headers=other_headers,
                 )
                 self.assertEqual(forbidden.status_code, 403)
+                self.assertEqual(
+                    client.get(
+                        f"/agent/{thread_id}/audit", headers=admin_headers
+                    ).status_code,
+                    200,
+                )
             finally:
-                for item in client.get("/documents").json():
+                for item in client.get(
+                    "/documents", headers=admin_headers
+                ).json():
                     if item["document_id"] not in before:
-                        client.delete(f"/documents/{item['document_id']}")
+                        client.delete(
+                            f"/documents/{item['document_id']}",
+                            headers=admin_headers,
+                        )
                 for thread_id in thread_ids:
                     agent_service._checkpointer.delete_thread(thread_id)
                     with agent_service._audit_engine.begin() as connection:
@@ -84,3 +130,11 @@ class M3RealAgentTest(unittest.TestCase):
                             "DELETE FROM agent_threads WHERE thread_id = %s",
                             (thread_id,),
                         )
+                with auth_service._engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            "DELETE FROM users "
+                            "WHERE user_id = ANY(CAST(:user_ids AS UUID[]))"
+                        ),
+                        {"user_ids": [principal.user_id for principal in principals]},
+                    )

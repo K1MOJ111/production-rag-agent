@@ -55,4 +55,15 @@
 - 偏离检查：无。继续使用标准库日志、现有 FastAPI 和 Docker Compose，没有为演示项目增加 Prometheus、OpenTelemetry、Kubernetes 或云资源。
 - 门禁结论：通过。M0-M5 既定升级阶段完成；后续认证、真实业务系统或目标部署环境都需要先确定具体边界，不能自动视为已完成。
 
-一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、[LangGraph PostgreSQL memory](https://docs.langchain.com/oss/python/langgraph/add-memory)。
+## M6：本地认证与角色权限
+
+- 状态：完成。
+- 已完成：PostgreSQL `users` 表、Argon2id 密码哈希、统一登录失败响应、30分钟 HS256 Bearer JWT、`sub`/`exp`/`iss`/`aud` 严格校验、数据库实时角色/启用状态检查和 viewer/operator/admin 权限。
+- 身份替换：Agent API 不再接受 `X-Actor-Id`；线程归属和审计直接使用已验证 JWT 的用户 UUID。admin 只能越过归属限制读取指定线程审计，不能替他人确认操作。
+- 已验证：普通测试30项中25项通过、5项真实链路按开关跳过；伪造、过期或缺失 Token 返回401，角色越权返回403，日志不包含 Token；PostgreSQL 只保存 Argon2 哈希；M4持久化隔离和真实四工具 Agent+JWT 回归通过。
+- 本机状态：随机 `JWT_SECRET` 已写入被 Git 忽略的 `.env`；首个管理员尚未创建，因为管理员密码必须由用户在终端隐藏输入。
+- 安全边界：JWT不加密且没有撤销列表；未实现 Refresh Token、开放注册、第三方登录、登录限流或账号锁定。公开部署前必须配置 HTTPS 和网关限流。
+- 偏离检查：无。认证通过单一 `Principal(user_id, role)` seam 接入，复用 M4 线程归属和审计，没有把 JWT 逻辑放入 Agent，也没有搭建不需要的完整 OAuth 授权服务器。
+- 门禁结论：通过。M0-M6 已形成可运行、可验证的本地生产化案例；真实业务接入和外部部署仍需单独确定目标系统与授权边界。
+
+一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、[LangGraph PostgreSQL memory](https://docs.langchain.com/oss/python/langgraph/add-memory)、[FastAPI JWT](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/)、[OAuth 2.0 Security BCP](https://www.rfc-editor.org/rfc/rfc9700.html)、[OWASP JWT](https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html)。

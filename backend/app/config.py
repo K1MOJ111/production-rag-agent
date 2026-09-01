@@ -1,4 +1,5 @@
 import os
+import secrets
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -16,6 +17,10 @@ class Settings:
     deepseek_base_url: str
     deepseek_model: str
     min_similarity_score: float
+    jwt_secret: str
+    jwt_issuer: str
+    jwt_audience: str
+    jwt_expire_minutes: int
 
     @classmethod
     def from_env(cls, values: Mapping[str, str] | None = None) -> "Settings":
@@ -45,6 +50,13 @@ class Settings:
             if missing:
                 raise ValueError(f"real mode requires: {', '.join(missing)}")
 
+        jwt_secret = env.get("JWT_SECRET", "").strip()
+        jwt_expire_minutes = int(env.get("JWT_EXPIRE_MINUTES", "30") or "30")
+        if mode == "real" and len(jwt_secret.encode()) < 32:
+            raise ValueError("real mode requires JWT_SECRET with at least 32 bytes")
+        if not 1 <= jwt_expire_minutes <= 1440:
+            raise ValueError("JWT_EXPIRE_MINUTES must be between 1 and 1440")
+
         return cls(
             rag_mode=mode,
             database_url=env.get("DATABASE_URL") or None,
@@ -61,4 +73,10 @@ class Settings:
             ),
             deepseek_model=env.get("DEEPSEEK_MODEL", "deepseek-v4-flash"),
             min_similarity_score=min_score,
+            jwt_secret=jwt_secret or secrets.token_urlsafe(32),
+            jwt_issuer=env.get("JWT_ISSUER", "rag-agent-local").strip()
+            or "rag-agent-local",
+            jwt_audience=env.get("JWT_AUDIENCE", "rag-agent-api").strip()
+            or "rag-agent-api",
+            jwt_expire_minutes=jwt_expire_minutes,
         )

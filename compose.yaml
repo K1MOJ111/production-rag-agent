@@ -14,6 +14,10 @@ services:
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
       RERANK_MODEL: ${RERANK_MODEL:-qwen3-rerank}
       MIN_SIMILARITY_SCORE: ${MIN_SIMILARITY_SCORE:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_ISSUER: ${JWT_ISSUER:-rag-agent-local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-rag-agent-api}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-30}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

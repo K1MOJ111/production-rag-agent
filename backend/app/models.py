@@ -82,8 +82,14 @@ class AgentResponse(BaseModel):
 class AgentAuditEntry(BaseModel):
     event_id: int
     thread_id: str
+    actor_id: str
     event_type: str
     status: str
     used_tools: list[str]
     details: dict
     created_at: datetime
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
