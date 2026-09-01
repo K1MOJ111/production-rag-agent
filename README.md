@@ -8,8 +8,9 @@
 - **M1 已完成**：百炼 Embedding、DeepSeek、PostgreSQL+pgvector、持久化和真实问答均已验收。
 - **M2 已完成**：已加入向量+关键词混合召回、百炼 Rerank、引用校验和固定检索 Eval。
 - **M3 已完成**：单个 LangGraph Agent 可编排知识检索、演示订单/库存查询和需人工确认的取消草稿。
+- **M4 已完成**：Agent 检查点持久化到 PostgreSQL，并增加线程归属约束和最小审计查询。
 - 默认 `RAG_MODE=mock`，仍可零费用运行；只有显式切换到 `real` 才连接数据库和模型 API。
-- 当前 Agent 使用进程内检查点和演示业务数据，尚无权限审计、持久化会话、监控或生产部署，不能表述为已接入真实订单系统或已生产部署。
+- 当前 Agent 仍使用演示业务数据；`X-Actor-Id` 只接收上游身份并做线程隔离，不等于登录认证。尚无监控或生产部署，不能表述为已接入真实订单系统或已生产部署。
 
 ```text
 上传或读取文档
@@ -146,15 +147,28 @@ cd backend
 
 ## M3 Agent 接口
 
-`POST /agent/run` 接收 `message` 和可选 `thread_id`，返回回答、实际调用的 `used_tools`，或 `needs_confirmation`。`POST /agent/confirm` 用同一 `thread_id` 批准或拒绝草稿。批准只记录草稿结果，不会执行订单操作。
+`POST /agent/run` 接收 `message` 和可选 `thread_id`，返回回答、实际调用的 `used_tools`，或 `needs_confirmation`。`POST /agent/confirm` 用同一 `thread_id` 批准或拒绝草稿。两者都必须带 `X-Actor-Id` 请求头；同一线程不能被其他调用方读取或继续。批准只记录草稿结果，不会执行订单操作。
+
+`GET /agent/{thread_id}/audit` 返回该调用方的运行/确认状态、工具名和动作元数据。审计不保存完整提问、模型回答或密钥。
 
 演示工具：`knowledge_search`、`get_order`、`get_inventory`、`draft_order_cancellation`。订单和库存是代码内固定演示数据，不是公司或生产数据。
+
+免费验证待确认状态可跨 Agent 实例恢复：
+
+```powershell
+cd backend
+$env:RUN_POSTGRES_INTEGRATION='1'
+../.venv/Scripts/python.exe -m dotenv -f ../.env run -- `
+  ../.venv/Scripts/python.exe -m unittest tests.test_m4_persistence -v
+```
 
 ## 后续里程碑
 
 - M1：接入真实 Embedding、LLM 和 PostgreSQL+pgvector。
 - M2：加入混合检索、Rerank、引用校验与固定 Eval。
 - M3：用单个 LangGraph Agent 编排知识检索、订单/库存查询和需人工确认的操作草稿（已完成）。
+- M4：用 PostgreSQL 持久化 Agent 状态，并加入线程归属和最小审计（已完成）。
+- M5：补运行可观测性、就绪检查和部署验证。
 
 `.env.example` 只声明后续阶段需要的变量名；真实密钥必须写入被 Git 忽略的 `.env`。本项目采用 [MIT License](LICENSE)。
 

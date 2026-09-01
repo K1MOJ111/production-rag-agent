@@ -57,6 +57,17 @@ class BaselineApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_agent_requires_actor_header_and_real_mode(self) -> None:
+        payload = {"thread_id": "test-thread", "message": "查询订单"}
+
+        self.assertEqual(self.client.post("/agent/run", json=payload).status_code, 422)
+        self.assertEqual(
+            self.client.post(
+                "/agent/run", json=payload, headers={"X-Actor-Id": "actor-a"}
+            ).status_code,
+            503,
+        )
+
 
 class ChunkServiceTest(unittest.TestCase):
     def test_clean_and_split_with_overlap(self) -> None:

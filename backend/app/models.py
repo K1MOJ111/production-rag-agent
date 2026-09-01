@@ -60,12 +60,14 @@ class LoadSamplesResponse(BaseModel):
 
 
 class AgentRunRequest(BaseModel):
-    message: str = Field(..., min_length=1)
-    thread_id: str = Field(default_factory=lambda: uuid4().hex, min_length=1)
+    message: str = Field(..., min_length=1, max_length=4000)
+    thread_id: str = Field(
+        default_factory=lambda: uuid4().hex, min_length=1, max_length=128
+    )
 
 
 class AgentConfirmRequest(BaseModel):
-    thread_id: str = Field(..., min_length=1)
+    thread_id: str = Field(..., min_length=1, max_length=128)
     approved: bool
 
 
@@ -75,3 +77,13 @@ class AgentResponse(BaseModel):
     answer: str | None = None
     pending_action: dict | None = None
     used_tools: list[str] = Field(default_factory=list)
+
+
+class AgentAuditEntry(BaseModel):
+    event_id: int
+    thread_id: str
+    event_type: str
+    status: str
+    used_tools: list[str]
+    details: dict
+    created_at: datetime

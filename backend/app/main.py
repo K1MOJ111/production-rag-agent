@@ -1,12 +1,13 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 
 from .models import (
     AskRequest,
     AskResponse,
     AgentConfirmRequest,
+    AgentAuditEntry,
     AgentResponse,
     AgentRunRequest,
     ChunkInfo,
@@ -80,7 +81,10 @@ if settings.rag_mode == "real":
         }
 
     agent_service = LangGraphAgentService(
-        settings.deepseek_model, agent_knowledge_search, llm_service.client
+        settings.deepseek_model,
+        agent_knowledge_search,
+        llm_service.client,
+        settings.database_url,
     )
 else:
     agent_service = None
@@ -89,6 +93,8 @@ else:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
+    if agent_service:
+        agent_service.close()
     close = getattr(store, "close", None)
     if close:
         await close()
@@ -97,7 +103,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="RAG Demo API",
     description="Enterprise knowledge base API with mock and real RAG modes.",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -218,11 +224,18 @@ def ask_question(payload: AskRequest) -> AskResponse:
 
 
 @app.post("/agent/run", response_model=AgentResponse)
-def run_agent(payload: AgentRunRequest) -> AgentResponse:
+def run_agent(
+    payload: AgentRunRequest,
+    actor_id: str = Header(..., alias="X-Actor-Id", min_length=1, max_length=128),
+) -> AgentResponse:
     if not agent_service:
         raise HTTPException(status_code=503, detail="agent requires real mode")
     try:
-        return AgentResponse(**agent_service.run(payload.thread_id, payload.message))
+        return AgentResponse(
+            **agent_service.run(actor_id, payload.thread_id, payload.message)
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
@@ -230,12 +243,37 @@ def run_agent(payload: AgentRunRequest) -> AgentResponse:
 
 
 @app.post("/agent/confirm", response_model=AgentResponse)
-def confirm_agent(payload: AgentConfirmRequest) -> AgentResponse:
+def confirm_agent(
+    payload: AgentConfirmRequest,
+    actor_id: str = Header(..., alias="X-Actor-Id", min_length=1, max_length=128),
+) -> AgentResponse:
     if not agent_service:
         raise HTTPException(status_code=503, detail="agent requires real mode")
     try:
-        return AgentResponse(**agent_service.confirm(payload.thread_id, payload.approved))
+        return AgentResponse(
+            **agent_service.confirm(actor_id, payload.thread_id, payload.approved)
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="agent unavailable") from exc
+
+
+@app.get("/agent/{thread_id}/audit", response_model=list[AgentAuditEntry])
+def get_agent_audit(
+    thread_id: str,
+    actor_id: str = Header(..., alias="X-Actor-Id", min_length=1, max_length=128),
+) -> list[AgentAuditEntry]:
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="agent requires real mode")
+    try:
+        return [
+            AgentAuditEntry(**entry)
+            for entry in agent_service.list_audit(actor_id, thread_id)
+        ]
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

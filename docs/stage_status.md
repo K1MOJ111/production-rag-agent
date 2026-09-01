@@ -33,6 +33,16 @@
 - 数据边界：订单和库存为明确的代码内演示数据；批准草稿后仍为 `executed=false`，未连接任何真实业务系统。
 - 运行边界：检查点使用进程内 `InMemorySaver`，服务重启后待确认线程不会保留；持久化、用户隔离和审计应在后续生产化阶段完成。
 - 偏离检查：无。仍是单 Agent；没有多 Agent、MCP、真实写操作或未经确认的副作用。
-- 门禁结论：通过。仓库尚未定义 M4，不能自行猜测下一阶段范围。
+- 门禁结论：通过，已进入 M4。
 
-一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)。
+## M4：Agent 状态可靠性
+
+- 状态：完成。
+- 已完成：LangGraph PostgreSQL 检查点、严格 MessagePack 反序列化、`thread_id → actor_id` 归属、最小审计表和审计查询 API。
+- 已验证：待确认草稿跨 Agent 实例恢复；其他 `actor_id` 无法读取或确认；原调用方可继续；运行与确认审计跨实例保留；真实四工具 Agent 回归通过。
+- 数据边界：审计保存事件、状态、工具名和动作元数据，不保存完整提问、模型回答或密钥。
+- 身份边界：`X-Actor-Id` 必须由未来的可信网关或认证层注入；当前实现只做线程归属隔离，不构成身份认证。
+- 偏离检查：无。继续复用单 PostgreSQL 和单 Agent；没有新增 Redis、多 Agent、真实业务写入或伪造生产认证完成状态。
+- 门禁结论：通过。下一优先级是 M5 运行可观测性与部署就绪检查。
+
+一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、[LangGraph PostgreSQL memory](https://docs.langchain.com/oss/python/langgraph/add-memory)。
