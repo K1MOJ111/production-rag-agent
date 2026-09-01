@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
     yield
     close = getattr(store, "close", None)
     if close:
-        close()
+        await close()
 
 
 app = FastAPI(

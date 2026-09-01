@@ -5,7 +5,7 @@
 ## 当前阶段与事实边界
 
 - **M0 已完成**：已保留原始 Mock 版本，并建立 Git、测试、许可证和密钥保护规则。
-- **M1 已完成代码，尚未完成真实运行验收**：已实现百炼 Embedding、DeepSeek、PostgreSQL+pgvector、文档哈希/状态、持久化和引用编号。
+- **M1 已完成代码和本地数据库验收，尚未完成模型 API 验收**：已实现百炼 Embedding、DeepSeek、PostgreSQL+pgvector、文档哈希/状态、持久化和引用编号。
 - 默认 `RAG_MODE=mock`，仍可零费用运行；只有显式切换到 `real` 才连接数据库和模型 API。
 - 当前没有 LangGraph Agent、混合检索/Rerank、权限审计或生产部署，不能提前表述为生产级 RAG 或已实现 Agent。
 

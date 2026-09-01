@@ -1,3 +1,4 @@
+import asyncio
 import os
 import unittest
 from pathlib import Path
@@ -32,7 +33,7 @@ class RealRagIntegrationTest(unittest.TestCase):
             sample.name, sample.read_text(encoding="utf-8")
         )
         document_id = document["document_id"]
-        store.close()
+        asyncio.run(store.close())
 
         reopened = PostgresVectorStore(
             settings.database_url, embedder, settings.embedding_dimension
@@ -68,4 +69,4 @@ class RealRagIntegrationTest(unittest.TestCase):
             self.assertTrue(answer.strip())
         finally:
             reopened.delete_document(document_id)
-            reopened.close()
+            asyncio.run(reopened.close())

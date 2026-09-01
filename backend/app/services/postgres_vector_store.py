@@ -1,4 +1,6 @@
+import asyncio
 import hashlib
+import sys
 from uuid import uuid4
 
 from langchain_core.documents import Document
@@ -8,10 +10,17 @@ from sqlalchemy import create_engine, inspect, text
 from .vector_store import ChunkRecord
 
 
+def _configure_postgres_event_loop() -> None:
+    if sys.platform == "win32":
+        # ponytail: remove when langchain-postgres supports a loop factory on Windows.
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
 class PostgresVectorStore:
     TABLE_NAME = "rag_chunks"
 
     def __init__(self, database_url: str, embedding_service, vector_size: int) -> None:
+        _configure_postgres_event_loop()
         self._sql_engine = create_engine(database_url, pool_pre_ping=True)
         self._pg_engine = PGEngine.from_connection_string(url=database_url)
         self._ensure_schema(vector_size)
@@ -226,8 +235,8 @@ class PostgresVectorStore:
             for document, score in results
         ]
 
-    def close(self) -> None:
-        self._pg_engine.close()
+    async def close(self) -> None:
+        await self._pg_engine.close()
         self._sql_engine.dispose()
 
     @staticmethod

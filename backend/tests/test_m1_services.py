@@ -1,10 +1,15 @@
+import asyncio
+import sys
 import unittest
 from types import SimpleNamespace
 
 from app.config import Settings
 from app.services.dashscope_embedding_service import DashScopeEmbeddingService
 from app.services.deepseek_llm_service import DeepSeekLLMService
-from app.services.postgres_vector_store import PostgresVectorStore
+from app.services.postgres_vector_store import (
+    PostgresVectorStore,
+    _configure_postgres_event_loop,
+)
 
 
 class SettingsTest(unittest.TestCase):
@@ -109,3 +114,12 @@ class DocumentHashTest(unittest.TestCase):
         self.assertEqual(first, PostgresVectorStore.document_hash(["甲", "乙"]))
         self.assertNotEqual(first, PostgresVectorStore.document_hash(["甲乙"]))
         self.assertEqual(len(first), 64)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows compatibility check")
+    def test_postgres_uses_selector_event_loop_on_windows(self) -> None:
+        _configure_postgres_event_loop()
+        loop = asyncio.new_event_loop()
+        try:
+            self.assertIsInstance(loop, asyncio.SelectorEventLoop)
+        finally:
+            loop.close()
