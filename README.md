@@ -5,9 +5,10 @@
 ## 当前阶段与事实边界
 
 - **M0 已完成**：已保留原始 Mock 版本，并建立 Git、测试、许可证和密钥保护规则。
-- **M1 已完成代码和本地数据库验收，尚未完成模型 API 验收**：已实现百炼 Embedding、DeepSeek、PostgreSQL+pgvector、文档哈希/状态、持久化和引用编号。
+- **M1 已完成**：百炼 Embedding、DeepSeek、PostgreSQL+pgvector、持久化和真实问答均已验收。
+- **M2 已完成**：已加入向量+关键词混合召回、百炼 Rerank、引用校验和固定检索 Eval。
 - 默认 `RAG_MODE=mock`，仍可零费用运行；只有显式切换到 `real` 才连接数据库和模型 API。
-- 当前没有 LangGraph Agent、混合检索/Rerank、权限审计或生产部署，不能提前表述为生产级 RAG 或已实现 Agent。
+- 当前没有 LangGraph Agent、权限审计、监控或生产部署，不能提前表述为已实现 Agent 或已生产部署。
 
 ```text
 上传或读取文档
@@ -129,17 +130,18 @@ cd backend
 python -m uvicorn app.main:app --env-file ../.env --port 8000
 ```
 
-默认模型为当前百炼低成本文本向量模型 `qwen3.7-text-embedding-flash`（1024 维）和 `deepseek-v4-flash`。模型名、维度、地址和临时拒答阈值均由环境变量控制；更换向量维度后必须重建向量表。
+默认模型为百炼 `qwen3.7-text-embedding-flash`（1024 维）、`qwen3-rerank` 和 `deepseek-v4-flash`。模型名、维度、地址和临时拒答阈值均由环境变量控制；更换向量维度后必须重建向量表。
 
 真实集成检查会连接 PostgreSQL并产生少量模型费用，因此默认跳过：
 
 ```powershell
 cd backend
 ../.venv/Scripts/python.exe -m dotenv -f ../.env run -- `
-  ../.venv/Scripts/python.exe -m unittest tests.test_real_integration -v
+  ../.venv/Scripts/python.exe -m unittest `
+  tests.test_real_integration tests.test_m2_real_eval -v
 ```
 
-执行前还需在 `.env` 中设置 `RUN_REAL_INTEGRATION=1`。该检查验证重连后数据仍存在、相关问答、无关问题拒答和 DeepSeek 回答，结束后删除测试文档。
+执行前还需在 `.env` 中设置 `RUN_REAL_INTEGRATION=1`。该检查验证重连持久化、混合检索、Rerank、相关问答、无关问题拒答、引用校验和固定 5 题 Eval，结束后删除测试文档。
 
 ## 后续里程碑
 

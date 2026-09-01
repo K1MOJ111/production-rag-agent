@@ -16,7 +16,7 @@ from .config import Settings
 from .services.document_service import DocumentService
 from .services.mock_embedding_service import MockEmbeddingService
 from .services.mock_llm_service import MockLLMService
-from .services.prompt_service import build_prompt
+from .services.prompt_service import build_prompt, has_valid_citations
 from .services.vector_store import InMemoryVectorStore
 
 
@@ -24,6 +24,7 @@ settings = Settings.from_env()
 if settings.rag_mode == "real":
     from .services.dashscope_embedding_service import DashScopeEmbeddingService
     from .services.deepseek_llm_service import DeepSeekLLMService
+    from .services.dashscope_rerank_service import DashScopeRerankService
     from .services.postgres_vector_store import PostgresVectorStore
 
     embedder = DashScopeEmbeddingService(
@@ -42,10 +43,16 @@ if settings.rag_mode == "real":
         base_url=settings.deepseek_base_url,
         model=settings.deepseek_model,
     )
+    reranker = DashScopeRerankService(
+        settings.dashscope_api_key,
+        settings.dashscope_base_url,
+        settings.rerank_model,
+    )
 else:
     embedder = MockEmbeddingService()
     store = InMemoryVectorStore()
     llm_service = MockLLMService()
+    reranker = None
 
 document_service = DocumentService(store=store, embedder=embedder)
 MIN_SIMILARITY_SCORE = settings.min_similarity_score
@@ -140,9 +147,15 @@ def ask_question(payload: AskRequest) -> AskResponse:
     try:
         raw_sources = store.search(
             question=payload.question,
-            top_k=payload.top_k,
+            top_k=payload.top_k * 4,
             embedder=embedder,
         )
+        if reranker:
+            raw_sources = reranker.rerank(
+                payload.question, raw_sources, payload.top_k
+            )
+        else:
+            raw_sources = raw_sources[: payload.top_k]
     except Exception as exc:
         raise HTTPException(status_code=503, detail="retrieval unavailable") from exc
     sources = [
@@ -169,6 +182,8 @@ def ask_question(payload: AskRequest) -> AskResponse:
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail="answer generation unavailable") from exc
+    if not has_valid_citations(answer, sources):
+        raise HTTPException(status_code=502, detail="answer citation validation failed")
 
     return AskResponse(
         answer=answer,

@@ -1,3 +1,6 @@
+import re
+
+
 def build_prompt(question: str, sources: list[dict]) -> str:
     if not sources:
         references = "未检索到相关资料。"
@@ -19,3 +22,9 @@ def build_prompt(question: str, sources: list[dict]) -> str:
         f"用户问题：{question}\n\n"
         "请给出简洁答案；每个事实后使用 [资料 N] 标注依据。"
     )
+
+
+def has_valid_citations(answer: str, sources: list[dict]) -> bool:
+    cited = {int(value) for value in re.findall(r"\[资料\s*(\d+)\]", answer)}
+    valid = {int(source["citation_id"]) for source in sources}
+    return bool(cited) and cited <= valid

@@ -4,7 +4,7 @@
 
 我做的是一个企业文档知识库问答系统。用户可以上传或读取企业制度文档，系统会把文档清洗后切成 chunk，再做 Embedding 并存入向量库。用户提问时，系统把问题向量化，检索相关 chunk，拼成 Prompt，再交给大模型生成答案，并返回引用来源。
 
-第一版我先用了 mock Embedding 和 mock LLM，目的是先跑通 RAG 主链路。后续可以把 mock 模块替换成真实 Embedding API、真实向量数据库和真实大模型 API。
+项目保留零费用 mock 模式用于回归测试；真实模式使用百炼 Embedding、PostgreSQL+pgvector、向量与关键词混合召回、百炼 Rerank 和 DeepSeek，并在返回前校验引用编号。
 
 ## 核心流程
 
@@ -12,13 +12,15 @@
 文档上传 / 读取示例文档
  -> 文本清洗
  -> chunk 切分
- -> mock Embedding
- -> 存入内存向量库
+ -> 百炼 Embedding
+ -> 存入 PostgreSQL+pgvector
  -> 用户提问
  -> 问题向量化
- -> 相似度检索 top-k
+ -> 向量与关键词混合召回
+ -> qwen3-rerank 二次排序
  -> 拼接 Prompt
- -> mock LLM 生成答案
+ -> DeepSeek 生成答案
+ -> 校验 [资料 N] 引用
  -> 返回 answer + sources + prompt
 ```
 
@@ -51,10 +53,10 @@ POST /qa/ask
 
 ## mock 版怎么解释
 
-mock 版不是最终生产方案，而是 MVP。它的价值是先验证工程流程：文档处理、chunk 切分、检索、Prompt 拼接和答案返回。等流程跑通后，把 `MockEmbeddingService` 替换成真实 Embedding 模型，把 `MockLLMService` 替换成真实大模型接口即可。
+mock 版用于无密钥的快速演示和回归测试；真实模式已经接入模型 API 和持久化数据库。两种模式走同一组文档、检索、Prompt 和接口入口，便于低成本测试。
 
 ## 如果面试官问项目不足
 
 可以这样回答：
 
-第一版是为了跑通主链路，所以还没有接真实向量数据库、真实大模型、权限系统和效果评估。后续我会优先补三块：第一，接入真实 Embedding 和 LLM；第二，加入 Rerank、相似度阈值和引用来源；第三，增加问答日志和人工评估集，用来持续优化检索效果。
+当前已完成真实 Embedding、向量数据库、混合检索、Rerank、引用校验和 5 题固定检索 Eval。边界是尚未实现 Agent、业务工具、权限审计、监控和生产部署；下一阶段先用单个 LangGraph Agent 编排只读工具，再为有副作用的操作增加人工确认。

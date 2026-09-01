@@ -37,6 +37,7 @@ class SettingsTest(unittest.TestCase):
             }
         )
         self.assertEqual(settings.embedding_dimension, 1024)
+        self.assertEqual(settings.rerank_model, "qwen3-rerank")
         self.assertEqual(settings.min_similarity_score, 0.55)
 
 

@@ -44,6 +44,7 @@ class PostgresVectorStore:
     def _ensure_schema(self, vector_size: int) -> None:
         with self._sql_engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
             connection.execute(
                 text(
                     """
@@ -221,19 +222,54 @@ class PostgresVectorStore:
 
     def search(self, question: str, top_k: int, embedder) -> list[dict]:
         del embedder
-        results = self._vector_store.similarity_search_with_relevance_scores(
+        dense_results = self._vector_store.similarity_search_with_relevance_scores(
             question, k=top_k
         )
-        return [
-            {
+        candidates: dict[str, dict] = {}
+        for rank, (document, score) in enumerate(dense_results, start=1):
+            candidates[document.metadata["chunk_id"]] = {
                 "document_id": document.metadata["document_id"],
                 "filename": document.metadata["filename"],
                 "chunk_id": document.metadata["chunk_id"],
                 "score": round(max(0.0, min(1.0, float(score))), 4),
                 "content": document.page_content,
+                "_rrf": 1 / (60 + rank),
             }
-            for document, score in results
-        ]
+
+        with self._sql_engine.connect() as connection:
+            lexical_rows = connection.execute(
+                text(
+                    f"""
+                    SELECT document_id, filename, chunk_id, content,
+                           similarity(content, :question) AS lexical_score
+                    FROM {self.TABLE_NAME}
+                    WHERE similarity(content, :question) > 0
+                    ORDER BY lexical_score DESC
+                    LIMIT :top_k
+                    """
+                ),
+                {"question": question, "top_k": top_k},
+            ).mappings().all()
+
+        for rank, row in enumerate(lexical_rows, start=1):
+            chunk_id = row["chunk_id"]
+            candidate = candidates.setdefault(
+                chunk_id,
+                {
+                    "document_id": row["document_id"],
+                    "filename": row["filename"],
+                    "chunk_id": chunk_id,
+                    "score": round(float(row["lexical_score"]), 4),
+                    "content": row["content"],
+                    "_rrf": 0.0,
+                },
+            )
+            candidate["_rrf"] += 1 / (60 + rank)
+
+        ranked = sorted(candidates.values(), key=lambda item: item["_rrf"], reverse=True)
+        for item in ranked:
+            item.pop("_rrf")
+        return ranked[:top_k]
 
     async def close(self) -> None:
         await self._pg_engine.close()

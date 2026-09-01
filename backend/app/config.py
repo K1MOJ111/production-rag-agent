@@ -11,6 +11,7 @@ class Settings:
     dashscope_base_url: str | None
     embedding_model: str
     embedding_dimension: int
+    rerank_model: str
     deepseek_api_key: str | None
     deepseek_base_url: str
     deepseek_model: str
@@ -53,6 +54,7 @@ class Settings:
                 "EMBEDDING_MODEL", "qwen3.7-text-embedding-flash"
             ),
             embedding_dimension=dimension,
+            rerank_model=env.get("RERANK_MODEL", "qwen3-rerank"),
             deepseek_api_key=env.get("DEEPSEEK_API_KEY") or None,
             deepseek_base_url=env.get(
                 "DEEPSEEK_BASE_URL", "https://api.deepseek.com"

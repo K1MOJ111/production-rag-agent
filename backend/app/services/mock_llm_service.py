@@ -13,5 +13,5 @@ class MockLLMService:
         return (
             f"根据知识库中与“{question}”最相关的资料，答案可以参考："
             f"{evidence}。依据主要来自《{best_source['filename']}》"
-            f"的片段 {best_source['chunk_id']}。"
+            f"的片段 {best_source['chunk_id']}。[资料 {best_source['citation_id']}]"
         )
