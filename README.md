@@ -124,6 +124,7 @@ python -m unittest discover -s tests -v
 ```powershell
 Copy-Item .env.example .env
 # 编辑 .env，将 RAG_MODE 改为 real 并填写必需变量
+docker compose up -d postgres
 cd backend
 python -m uvicorn app.main:app --env-file ../.env --port 8000
 ```
