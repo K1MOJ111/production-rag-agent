@@ -123,4 +123,4 @@ python -m unittest discover -s tests -v
 - M2：加入混合检索、Rerank、引用校验与固定 Eval。
 - M3：用单个 LangGraph Agent 编排知识检索、订单/库存查询和需人工确认的操作草稿。
 
-`.env.example` 只声明后续阶段需要的变量名；真实密钥必须写入被 Git 忽略的 `.env`。许可证尚未选择，在添加 `LICENSE` 前默认保留所有权利。
+`.env.example` 只声明后续阶段需要的变量名；真实密钥必须写入被 Git 忽略的 `.env`。本项目采用 [MIT License](LICENSE)。
