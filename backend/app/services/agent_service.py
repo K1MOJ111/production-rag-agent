@@ -178,6 +178,10 @@ class LangGraphAgentService:
         if self._audit_engine:
             self._audit_engine.dispose()
 
+    def check_ready(self) -> None:
+        if self._checkpoint_connection:
+            self._checkpoint_connection.execute("SELECT 1").fetchone()
+
     def _ensure_audit_schema(self) -> None:
         with self._audit_engine.begin() as connection:
             connection.execute(

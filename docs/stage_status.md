@@ -45,4 +45,14 @@
 - 偏离检查：无。继续复用单 PostgreSQL 和单 Agent；没有新增 Redis、多 Agent、真实业务写入或伪造生产认证完成状态。
 - 门禁结论：通过。下一优先级是 M5 运行可观测性与部署就绪检查。
 
+## M5：运行可观测性与部署就绪
+
+- 状态：完成。
+- 已完成：`/health` 存活检查、真实模式 PostgreSQL `/ready` 就绪检查、响应 `X-Request-Id`、结构化请求耗时日志、非 root Docker 镜像和可选 Compose `app` profile。
+- 已验证：普通测试 25 项中 21 项通过、4 项真实链路按环境开关跳过；Compose 配置校验通过；镜像构建成功；mock 容器和真实模式 Compose 容器均返回 200；真实模式报告 `database=ok`，容器健康、非 root 运行且日志可见。
+- 运行边界：`/ready` 不调用付费模型 API，只验证当前必要的数据库依赖；日志输出到标准输出，尚未接入指标、链路追踪或集中日志平台。
+- 部署边界：完成的是本机 Docker/Compose 可运行证据，不是云端或公司生产环境部署。
+- 偏离检查：无。继续使用标准库日志、现有 FastAPI 和 Docker Compose，没有为演示项目增加 Prometheus、OpenTelemetry、Kubernetes 或云资源。
+- 门禁结论：通过。M0-M5 既定升级阶段完成；后续认证、真实业务系统或目标部署环境都需要先确定具体边界，不能自动视为已完成。
+
 一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、[LangGraph PostgreSQL memory](https://docs.langchain.com/oss/python/langgraph/add-memory)。

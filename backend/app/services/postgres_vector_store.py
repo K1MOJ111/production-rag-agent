@@ -220,6 +220,10 @@ class PostgresVectorStore:
             )
         return True
 
+    def check_ready(self) -> None:
+        with self._sql_engine.connect() as connection:
+            connection.execute(text("SELECT 1")).scalar_one()
+
     def search(self, question: str, top_k: int, embedder) -> list[dict]:
         del embedder
         dense_results = self._vector_store.similarity_search_with_relevance_scores(

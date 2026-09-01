@@ -1,4 +1,5 @@
 import unittest
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 
@@ -20,6 +21,16 @@ class BaselineApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok", "mode": "mock"})
+        UUID(response.headers["X-Request-Id"])
+
+    def test_ready(self) -> None:
+        response = self.client.get("/ready")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"status": "ready", "mode": "mock", "database": "not_required"},
+        )
 
     def test_known_question_returns_sources(self) -> None:
         loaded = self.client.post("/documents/load-samples")

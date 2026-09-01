@@ -1,7 +1,11 @@
 from contextlib import asynccontextmanager
+import json
+import logging
 from pathlib import Path
+from time import perf_counter
+from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 
 from .models import (
     AskRequest,
@@ -24,6 +28,7 @@ from .services.prompt_service import build_prompt, has_valid_citations
 from .services.vector_store import InMemoryVectorStore
 
 
+logger = logging.getLogger("uvicorn.error")
 settings = Settings.from_env()
 if settings.rag_mode == "real":
     from .services.dashscope_embedding_service import DashScopeEmbeddingService
@@ -103,14 +108,57 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="RAG Demo API",
     description="Enterprise knowledge base API with mock and real RAG modes.",
-    version="0.4.0",
+    version="0.5.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def log_request(request: Request, call_next):
+    request_id = str(uuid4())
+    started = perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        response.headers["X-Request-Id"] = request_id
+        return response
+    finally:
+        logger.info(
+            json.dumps(
+                {
+                    "event": "request_complete",
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": status,
+                    "duration_ms": round((perf_counter() - started) * 1000, 2),
+                }
+            )
+        )
 
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "mode": settings.rag_mode}
+
+
+@app.get("/ready")
+def ready() -> dict:
+    checks = [getattr(store, "check_ready", None)]
+    if agent_service:
+        checks.append(agent_service.check_ready)
+    try:
+        for check in checks:
+            if check:
+                check()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="database unavailable") from exc
+    return {
+        "status": "ready",
+        "mode": settings.rag_mode,
+        "database": "ok" if checks[0] else "not_required",
+    }
 
 
 @app.post("/documents/upload", response_model=UploadResponse)

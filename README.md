@@ -9,8 +9,9 @@
 - **M2 已完成**：已加入向量+关键词混合召回、百炼 Rerank、引用校验和固定检索 Eval。
 - **M3 已完成**：单个 LangGraph Agent 可编排知识检索、演示订单/库存查询和需人工确认的取消草稿。
 - **M4 已完成**：Agent 检查点持久化到 PostgreSQL，并增加线程归属约束和最小审计查询。
+- **M5 已完成**：已加入请求 ID、结构化耗时日志、数据库就绪检查和非 root Docker 部署验证。
 - 默认 `RAG_MODE=mock`，仍可零费用运行；只有显式切换到 `real` 才连接数据库和模型 API。
-- 当前 Agent 仍使用演示业务数据；`X-Actor-Id` 只接收上游身份并做线程隔离，不等于登录认证。尚无监控或生产部署，不能表述为已接入真实订单系统或已生产部署。
+- 当前 Agent 仍使用演示业务数据；`X-Actor-Id` 只接收上游身份并做线程隔离，不等于登录认证。当前只有本地结构化日志和容器部署验证，不能表述为已接入真实订单系统或已生产部署。
 
 ```text
 上传或读取文档
@@ -162,13 +163,27 @@ $env:RUN_POSTGRES_INTEGRATION='1'
   ../.venv/Scripts/python.exe -m unittest tests.test_m4_persistence -v
 ```
 
+## M5 运行与部署检查
+
+`GET /health` 只检查进程存活；`GET /ready` 在真实模式下执行 PostgreSQL 连通检查。每个响应带 `X-Request-Id`，应用日志记录请求方法、路径、状态码和耗时，不记录请求正文或密钥。
+
+应用服务使用 Compose 的 `app` profile，避免原有 `docker compose up -d postgres` 意外启动应用：
+
+```powershell
+docker compose --profile app up -d --build
+Invoke-RestMethod http://127.0.0.1:8000/ready
+docker compose --profile app logs -f app
+```
+
+镜像以非 root 用户运行；真实配置仍从本机 `.env` 注入，不会复制进镜像。
+
 ## 后续里程碑
 
 - M1：接入真实 Embedding、LLM 和 PostgreSQL+pgvector。
 - M2：加入混合检索、Rerank、引用校验与固定 Eval。
 - M3：用单个 LangGraph Agent 编排知识检索、订单/库存查询和需人工确认的操作草稿（已完成）。
 - M4：用 PostgreSQL 持久化 Agent 状态，并加入线程归属和最小审计（已完成）。
-- M5：补运行可观测性、就绪检查和部署验证。
+- M5：补运行可观测性、就绪检查和部署验证（已完成）。
 
 `.env.example` 只声明后续阶段需要的变量名；真实密钥必须写入被 Git 忽略的 `.env`。本项目采用 [MIT License](LICENSE)。
 
