@@ -25,4 +25,14 @@
 - 偏离检查：无。仍使用单体 FastAPI 和单 PostgreSQL；未提前加入 Elasticsearch、Redis、多 Agent、权限或生产部署。
 - 门禁结论：通过，可以进入 M3。
 
-一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)。
+## M3：单 Agent 与人工确认
+
+- 状态：完成。
+- 已完成：单个 LangGraph `StateGraph`、知识检索工具、演示订单/库存只读工具、取消订单草稿、`interrupt`/`Command` 人工确认、API 和 `used_tools` 审计字段。
+- 已验证：本地 Agent 的订单、库存、批准、拒绝和不执行副作用测试通过；真实 DeepSeek 工具调用覆盖四个工具及中断恢复流程。
+- 数据边界：订单和库存为明确的代码内演示数据；批准草稿后仍为 `executed=false`，未连接任何真实业务系统。
+- 运行边界：检查点使用进程内 `InMemorySaver`，服务重启后待确认线程不会保留；持久化、用户隔离和审计应在后续生产化阶段完成。
+- 偏离检查：无。仍是单 Agent；没有多 Agent、MCP、真实写操作或未经确认的副作用。
+- 门禁结论：通过。仓库尚未定义 M4，不能自行猜测下一阶段范围。
+
+一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)。

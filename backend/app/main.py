@@ -6,6 +6,9 @@ from fastapi import FastAPI, HTTPException
 from .models import (
     AskRequest,
     AskResponse,
+    AgentConfirmRequest,
+    AgentResponse,
+    AgentRunRequest,
     ChunkInfo,
     DocumentInfo,
     LoadSamplesResponse,
@@ -26,6 +29,7 @@ if settings.rag_mode == "real":
     from .services.deepseek_llm_service import DeepSeekLLMService
     from .services.dashscope_rerank_service import DashScopeRerankService
     from .services.postgres_vector_store import PostgresVectorStore
+    from .services.agent_service import LangGraphAgentService
 
     embedder = DashScopeEmbeddingService(
         api_key=settings.dashscope_api_key,
@@ -61,6 +65,26 @@ LOW_CONFIDENCE_ANSWER = (
     "所以不能基于企业文档回答这个问题。"
 )
 
+if settings.rag_mode == "real":
+    def agent_knowledge_search(question: str) -> dict:
+        candidates = store.search(question, 12, embedder)
+        sources = reranker.rerank(question, candidates, 3)
+        if not sources or sources[0]["score"] < MIN_SIMILARITY_SCORE:
+            return {"found": False, "sources": []}
+        return {
+            "found": True,
+            "sources": [
+                {**source, "citation_id": index}
+                for index, source in enumerate(sources, start=1)
+            ],
+        }
+
+    agent_service = LangGraphAgentService(
+        settings.deepseek_model, agent_knowledge_search, llm_service.client
+    )
+else:
+    agent_service = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -73,7 +97,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="RAG Demo API",
     description="Enterprise knowledge base API with mock and real RAG modes.",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -191,3 +215,27 @@ def ask_question(payload: AskRequest) -> AskResponse:
         prompt=prompt,
         is_refused=False,
     )
+
+
+@app.post("/agent/run", response_model=AgentResponse)
+def run_agent(payload: AgentRunRequest) -> AgentResponse:
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="agent requires real mode")
+    try:
+        return AgentResponse(**agent_service.run(payload.thread_id, payload.message))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="agent unavailable") from exc
+
+
+@app.post("/agent/confirm", response_model=AgentResponse)
+def confirm_agent(payload: AgentConfirmRequest) -> AgentResponse:
+    if not agent_service:
+        raise HTTPException(status_code=503, detail="agent requires real mode")
+    try:
+        return AgentResponse(**agent_service.confirm(payload.thread_id, payload.approved))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="agent unavailable") from exc

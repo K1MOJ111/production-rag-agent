@@ -1,4 +1,6 @@
 from datetime import datetime
+from typing import Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -55,3 +57,21 @@ class AskResponse(BaseModel):
 class LoadSamplesResponse(BaseModel):
     loaded_count: int
     documents: list[DocumentInfo]
+
+
+class AgentRunRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    thread_id: str = Field(default_factory=lambda: uuid4().hex, min_length=1)
+
+
+class AgentConfirmRequest(BaseModel):
+    thread_id: str = Field(..., min_length=1)
+    approved: bool
+
+
+class AgentResponse(BaseModel):
+    thread_id: str
+    status: Literal["completed", "needs_confirmation"]
+    answer: str | None = None
+    pending_action: dict | None = None
+    used_tools: list[str] = Field(default_factory=list)
