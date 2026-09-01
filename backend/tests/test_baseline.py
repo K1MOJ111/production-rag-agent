@@ -19,7 +19,7 @@ class BaselineApiTest(unittest.TestCase):
         response = self.client.get("/health")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok"})
+        self.assertEqual(response.json(), {"status": "ok", "mode": "mock"})
 
     def test_known_question_returns_sources(self) -> None:
         loaded = self.client.post("/documents/load-samples")
@@ -34,6 +34,7 @@ class BaselineApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(body["is_refused"])
         self.assertTrue(body["sources"])
+        self.assertEqual(body["sources"][0]["citation_id"], 1)
         self.assertIn("员工报销制度.txt", {item["filename"] for item in body["sources"]})
 
     def test_unknown_question_is_refused(self) -> None:

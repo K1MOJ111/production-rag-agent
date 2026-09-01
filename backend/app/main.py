@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -11,6 +12,7 @@ from .models import (
     TextUploadRequest,
     UploadResponse,
 )
+from .config import Settings
 from .services.document_service import DocumentService
 from .services.mock_embedding_service import MockEmbeddingService
 from .services.mock_llm_service import MockLLMService
@@ -18,26 +20,60 @@ from .services.prompt_service import build_prompt
 from .services.vector_store import InMemoryVectorStore
 
 
-app = FastAPI(
-    title="RAG Demo API",
-    description="A minimal enterprise document Q&A demo for interview practice.",
-    version="0.1.0",
-)
+settings = Settings.from_env()
+if settings.rag_mode == "real":
+    from .services.dashscope_embedding_service import DashScopeEmbeddingService
+    from .services.deepseek_llm_service import DeepSeekLLMService
+    from .services.postgres_vector_store import PostgresVectorStore
 
-embedder = MockEmbeddingService()
-store = InMemoryVectorStore()
+    embedder = DashScopeEmbeddingService(
+        api_key=settings.dashscope_api_key,
+        base_url=settings.dashscope_base_url,
+        model=settings.embedding_model,
+        dimension=settings.embedding_dimension,
+    )
+    store = PostgresVectorStore(
+        database_url=settings.database_url,
+        embedding_service=embedder,
+        vector_size=settings.embedding_dimension,
+    )
+    llm_service = DeepSeekLLMService(
+        api_key=settings.deepseek_api_key,
+        base_url=settings.deepseek_base_url,
+        model=settings.deepseek_model,
+    )
+else:
+    embedder = MockEmbeddingService()
+    store = InMemoryVectorStore()
+    llm_service = MockLLMService()
+
 document_service = DocumentService(store=store, embedder=embedder)
-llm_service = MockLLMService()
-MIN_SIMILARITY_SCORE = 0.1
+MIN_SIMILARITY_SCORE = settings.min_similarity_score
 LOW_CONFIDENCE_ANSWER = (
     "我没有在知识库中检索到足够相关的资料，"
     "所以不能基于企业文档回答这个问题。"
 )
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    close = getattr(store, "close", None)
+    if close:
+        close()
+
+
+app = FastAPI(
+    title="RAG Demo API",
+    description="Enterprise knowledge base API with mock and real RAG modes.",
+    version="0.2.0",
+    lifespan=lifespan,
+)
+
+
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "mode": settings.rag_mode}
 
 
 @app.post("/documents/upload", response_model=UploadResponse)
@@ -49,6 +85,8 @@ def upload_document(payload: TextUploadRequest) -> UploadResponse:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="document indexing unavailable") from exc
 
     return UploadResponse(
         document_id=document["document_id"],
@@ -61,7 +99,10 @@ def upload_document(payload: TextUploadRequest) -> UploadResponse:
 @app.post("/documents/load-samples", response_model=LoadSamplesResponse)
 def load_samples() -> LoadSamplesResponse:
     sample_dir = Path(__file__).resolve().parents[2] / "sample_docs"
-    documents = document_service.load_sample_documents(sample_dir)
+    try:
+        documents = document_service.load_sample_documents(sample_dir)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="document indexing unavailable") from exc
     return LoadSamplesResponse(
         loaded_count=len(documents),
         documents=[DocumentInfo(**document) for document in documents],
@@ -96,11 +137,18 @@ def delete_document(document_id: str) -> dict:
 
 @app.post("/qa/ask", response_model=AskResponse)
 def ask_question(payload: AskRequest) -> AskResponse:
-    sources = store.search(
-        question=payload.question,
-        top_k=payload.top_k,
-        embedder=embedder,
-    )
+    try:
+        raw_sources = store.search(
+            question=payload.question,
+            top_k=payload.top_k,
+            embedder=embedder,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="retrieval unavailable") from exc
+    sources = [
+        {**source, "citation_id": index}
+        for index, source in enumerate(raw_sources, start=1)
+    ]
 
     # A weak top result is not reliable evidence for a grounded answer.
     if not sources or sources[0]["score"] < MIN_SIMILARITY_SCORE:
@@ -113,11 +161,14 @@ def ask_question(payload: AskRequest) -> AskResponse:
         )
 
     prompt = build_prompt(question=payload.question, sources=sources)
-    answer = llm_service.generate_answer(
-        question=payload.question,
-        sources=sources,
-        prompt=prompt,
-    )
+    try:
+        answer = llm_service.generate_answer(
+            question=payload.question,
+            sources=sources,
+            prompt=prompt,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="answer generation unavailable") from exc
 
     return AskResponse(
         answer=answer,

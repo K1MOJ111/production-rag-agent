@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -18,6 +20,9 @@ class DocumentInfo(BaseModel):
     filename: str
     chunk_count: int
     preview: str
+    content_hash: str | None = None
+    status: str = "ready"
+    created_at: datetime | None = None
 
 
 class ChunkInfo(BaseModel):
@@ -32,6 +37,7 @@ class AskRequest(BaseModel):
 
 
 class SourceInfo(BaseModel):
+    citation_id: int
     document_id: str
     filename: str
     chunk_id: str

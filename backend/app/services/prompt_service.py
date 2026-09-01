@@ -4,7 +4,7 @@ def build_prompt(question: str, sources: list[dict]) -> str:
     else:
         references = "\n\n".join(
             (
-                f"[资料 {index}]\n"
+                f"[资料 {source.get('citation_id', index)}]\n"
                 f"文件：{source['filename']}\n"
                 f"片段：{source['chunk_id']}\n"
                 f"内容：{source['content']}"
@@ -17,5 +17,5 @@ def build_prompt(question: str, sources: list[dict]) -> str:
         "如果资料不足，请明确说不知道，不要编造。\n\n"
         f"参考资料：\n{references}\n\n"
         f"用户问题：{question}\n\n"
-        "请给出简洁答案，并说明依据来自哪些资料。"
+        "请给出简洁答案；每个事实后使用 [资料 N] 标注依据。"
     )

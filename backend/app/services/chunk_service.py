@@ -1,5 +1,7 @@
 import re
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 
 def clean_text(text: str) -> str:
     """Normalize whitespace while keeping readable line breaks."""
@@ -17,14 +19,9 @@ def split_into_chunks(text: str, chunk_size: int = 500, overlap: int = 80) -> li
     if chunk_size <= overlap:
         raise ValueError("chunk_size must be larger than overlap")
 
-    chunks: list[str] = []
-    step = chunk_size - overlap
-
-    for start in range(0, len(cleaned), step):
-        chunk = cleaned[start : start + chunk_size].strip()
-        if chunk:
-            chunks.append(chunk)
-        if start + chunk_size >= len(cleaned):
-            break
-
-    return chunks
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=overlap,
+        separators=["\n\n", "\n", "。", "！", "？", "；", "，", "、", " ", ""],
+    )
+    return splitter.split_text(cleaned)

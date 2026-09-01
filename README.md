@@ -4,10 +4,10 @@
 
 ## 当前阶段与事实边界
 
-- 当前处于 **M0 基线阶段**：已保留原始 Mock 版本，并建立 Git、测试和密钥保护规则。
-- 当前使用 Mock Embedding、Mock LLM 和内存向量库；重启后数据会丢失。
-- 当前没有真实模型、PostgreSQL/pgvector、LangChain、LangGraph Agent、权限审计或生产部署。
-- 因此当前只能表述为“可运行的本地 RAG MVP”，不能表述为生产级 RAG 或已实现 Agent。
+- **M0 已完成**：已保留原始 Mock 版本，并建立 Git、测试、许可证和密钥保护规则。
+- **M1 已完成代码，尚未完成真实运行验收**：已实现百炼 Embedding、DeepSeek、PostgreSQL+pgvector、文档哈希/状态、持久化和引用编号。
+- 默认 `RAG_MODE=mock`，仍可零费用运行；只有显式切换到 `real` 才连接数据库和模型 API。
+- 当前没有 LangGraph Agent、混合检索/Rerank、权限审计或生产部署，不能提前表述为生产级 RAG 或已实现 Agent。
 
 ```text
 上传或读取文档
@@ -117,6 +117,29 @@ python -m unittest discover -s tests -v
 
 测试固定当前健康检查、文档加载、已知问题检索、低相关拒答、请求校验和切块重叠行为。测试只使用 Mock，不调用付费 API。
 
+## M1 真实模式
+
+复制 `.env.example` 为 `.env`，填写本机 PostgreSQL 连接串、百炼 API Key 和百炼控制台提供的 OpenAI 兼容 `base_url`。不要把 `.env` 提交到 Git。
+
+```powershell
+Copy-Item .env.example .env
+# 编辑 .env，将 RAG_MODE 改为 real 并填写必需变量
+cd backend
+python -m uvicorn app.main:app --env-file ../.env --port 8000
+```
+
+默认模型为当前百炼低成本文本向量模型 `qwen3.7-text-embedding-flash`（1024 维）和 `deepseek-v4-flash`。模型名、维度、地址和临时拒答阈值均由环境变量控制；更换向量维度后必须重建向量表。
+
+真实集成检查会连接 PostgreSQL并产生少量模型费用，因此默认跳过：
+
+```powershell
+cd backend
+../.venv/Scripts/python.exe -m dotenv -f ../.env run -- `
+  ../.venv/Scripts/python.exe -m unittest tests.test_real_integration -v
+```
+
+执行前还需在 `.env` 中设置 `RUN_REAL_INTEGRATION=1`。该检查验证重连后数据仍存在、相关问答、无关问题拒答和 DeepSeek 回答，结束后删除测试文档。
+
 ## 后续里程碑
 
 - M1：接入真实 Embedding、LLM 和 PostgreSQL+pgvector。
@@ -124,3 +147,5 @@ python -m unittest discover -s tests -v
 - M3：用单个 LangGraph Agent 编排知识检索、订单/库存查询和需人工确认的操作草稿。
 
 `.env.example` 只声明后续阶段需要的变量名；真实密钥必须写入被 Git 忽略的 `.env`。本项目采用 [MIT License](LICENSE)。
+
+阶段门禁及偏离检查记录见 [`docs/stage_status.md`](docs/stage_status.md)。

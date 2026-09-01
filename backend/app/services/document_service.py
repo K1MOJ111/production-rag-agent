@@ -1,15 +1,14 @@
 from pathlib import Path
+from typing import Any
 
 from .chunk_service import split_into_chunks
-from .mock_embedding_service import MockEmbeddingService
-from .vector_store import InMemoryVectorStore
 
 
 class DocumentService:
     def __init__(
         self,
-        store: InMemoryVectorStore,
-        embedder: MockEmbeddingService,
+        store: Any,
+        embedder: Any,
         chunk_size: int = 260,
         overlap: int = 50,
     ) -> None:
