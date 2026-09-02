@@ -1,1 +1,1 @@
-"""Minimal RAG demo backend."""
+"""Enterprise RAG and controlled business Agent API."""

@@ -66,4 +66,16 @@
 - 偏离检查：无。认证通过单一 `Principal(user_id, role)` seam 接入，复用 M4 线程归属和审计，没有把 JWT 逻辑放入 Agent，也没有搭建不需要的完整 OAuth 授权服务器。
 - 门禁结论：通过。M0-M6 已形成可运行、可验证的本地部署与安全基线；真实业务接入和外部部署仍需单独确定目标系统与授权边界。
 
+## M7：多格式文档入库与可追溯引用
+
+- 状态：完成。
+- 已完成：保留文本 JSON 接口，新增 multipart TXT/PDF/DOCX 上传；PDF 按页、DOCX 按标题和段落保存来源；文档列表、分块和问答来源返回文件类型及位置元数据。
+- 输入保护：文件上限 10 MiB；拒绝不支持类型、空文件、非 UTF-8 TXT、损坏文件和重复内容；无可提取文字的 PDF 明确返回 OCR/扫描件不支持。
+- 数据一致性：内存和 PostgreSQL 适配器采用相同内容哈希与来源字段；删除文档继续删除对应分块和向量；样例导入和既有内部调用仍可幂等复用已有文档。
+- 已验证：普通测试33项中27项通过、6项按环境开关跳过；新增Mock测试覆盖三种格式、异常输入、重复、引用来源和删除。M4/M6/M7 PostgreSQL无付费套件3项通过；M7验证来源元数据持久化和删除。Docker镜像重新构建成功并确认包含解析依赖、以非root用户运行。
+- 兼容性提示：Python 3.14 会提示当前 Windows Selector 事件循环策略将在 3.16 移除；PostgreSQL定向测试进程退出时仍有 psycopg 连接 `ResourceWarning`。两者未导致测试失败，但应在升级 Python 或 langchain-postgres 前完成生命周期复核，不能记为无警告运行。
+- 运行边界：仅提取文本，不做 OCR、复杂版式还原、表格语义恢复或图片理解；真实模型端到端回归本阶段未重复运行，不能记为本次通过。
+- 偏离检查：无。继续复用现有 DocumentService、PostgreSQL 和检索链路，只增加 pypdf、python-docx 两个必要解析依赖；没有引入多Agent、对象存储、OCR或前端。
+- 门禁结论：通过。下一阶段是 M8 本地 PostgreSQL 业务数据适配器与受控写操作。
+
 一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、[LangGraph PostgreSQL memory](https://docs.langchain.com/oss/python/langgraph/add-memory)、[FastAPI JWT](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/)、[OAuth 2.0 Security BCP](https://www.rfc-editor.org/rfc/rfc9700.html)、[OWASP JWT](https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html)。

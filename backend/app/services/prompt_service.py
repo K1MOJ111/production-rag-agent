@@ -5,15 +5,21 @@ def build_prompt(question: str, sources: list[dict]) -> str:
     if not sources:
         references = "未检索到相关资料。"
     else:
-        references = "\n\n".join(
-            (
-                f"[资料 {source.get('citation_id', index)}]\n"
-                f"文件：{source['filename']}\n"
-                f"片段：{source['chunk_id']}\n"
-                f"内容：{source['content']}"
+        blocks = []
+        for index, source in enumerate(sources, start=1):
+            lines = [
+                f"[资料 {source.get('citation_id', index)}]",
+                f"文件：{source['filename']}",
+            ]
+            if source.get("page_number") is not None:
+                lines.append(f"页码：{source['page_number']}")
+            if source.get("section"):
+                lines.append(f"位置：{source['section']}")
+            lines.extend(
+                [f"片段：{source['chunk_id']}", f"内容：{source['content']}"]
             )
-            for index, source in enumerate(sources, start=1)
-        )
+            blocks.append("\n".join(lines))
+        references = "\n\n".join(blocks)
 
     return (
         "你是企业知识库问答助手。请只根据参考资料回答用户问题；"

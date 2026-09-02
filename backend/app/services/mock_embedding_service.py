@@ -4,12 +4,7 @@ from collections import Counter
 
 
 class MockEmbeddingService:
-    """Small local embedding stand-in for learning the RAG flow.
-
-    It converts text into token-frequency vectors and compares them with cosine
-    similarity. A real project can replace this class with an API-based
-    embedding model without changing the rest of the flow.
-    """
+    """Deterministic token-frequency adapter for offline tests."""
 
     def embed(self, text: str) -> dict[str, float]:
         tokens = self._tokenize(text)

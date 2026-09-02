@@ -4,7 +4,7 @@
 
 ## 核心能力
 
-- 文档清洗、中文分块、向量化、持久化和生命周期管理。
+- TXT、PDF、DOCX 文档解析、中文分块、向量化、来源追踪和生命周期管理。
 - pgvector 语义召回与 `pg_trgm` 关键词召回，通过 RRF 融合后使用 `qwen3-rerank` 二次排序。
 - DeepSeek 基于检索资料生成回答；低相关问题拒答，回答引用必须匹配本次资料编号。
 - LangGraph Agent 编排知识检索、订单查询、库存查询和需人工确认的操作草稿。
@@ -47,7 +47,7 @@ PostgreSQL
 | 层级 | 技术 |
 |---|---|
 | API | FastAPI、Pydantic、Uvicorn |
-| 文本处理 | LangChain Text Splitters |
+| 文档处理 | pypdf、python-docx、LangChain Text Splitters |
 | Embedding | 百炼 `qwen3.7-text-embedding-flash`，1024维 |
 | 检索 | PostgreSQL、pgvector、`pg_trgm`、RRF |
 | Rerank | 百炼 `qwen3-rerank` |
@@ -137,7 +137,8 @@ Authorization: Bearer <access_token>
 | `GET` | `/health` | 公开 | 进程存活检查 |
 | `GET` | `/ready` | 公开 | PostgreSQL 与 Agent 检查点就绪检查 |
 | `POST` | `/auth/token` | 公开 | 用户名密码换取短期 JWT |
-| `POST` | `/documents/upload` | admin | 上传文本并完成切块、向量化和入库 |
+| `POST` | `/documents/upload` | admin | 通过 JSON 上传文本，保留兼容接口 |
+| `POST` | `/documents/upload-file` | admin | 通过 multipart 上传 TXT、PDF 或 DOCX |
 | `POST` | `/documents/load-samples` | admin | 导入仓库内的参考文档 |
 | `GET` | `/documents` | viewer | 查询文档列表 |
 | `GET` | `/documents/{id}/chunks` | viewer | 查询文档分块 |
@@ -146,6 +147,46 @@ Authorization: Bearer <access_token>
 | `POST` | `/agent/run` | operator | 运行 Agent 或生成待确认草稿 |
 | `POST` | `/agent/confirm` | operator | 批准或拒绝自己的草稿 |
 | `GET` | `/agent/{thread_id}/audit` | operator | 查看授权范围内的线程审计 |
+
+## 多格式文档入库
+
+文件上传上限为 10 MiB。TXT 必须使用 UTF-8；PDF 按页保存来源，DOCX 按标题和段落保存来源。扫描版 PDF 不做 OCR，无法提取文字时接口会明确返回 400。
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8000/documents/upload-file `
+  -H "Authorization: Bearer $token" `
+  -F "file=@.\travel-policy.pdf;type=application/pdf"
+```
+
+Mock 模式实际响应示例：
+
+```json
+{
+  "document_id": "doc_216872c3",
+  "filename": "travel-policy.pdf",
+  "file_type": "pdf",
+  "chunk_count": 1,
+  "status": "success"
+}
+```
+
+查询响应中的来源会保留文件和页码：
+
+```json
+{
+  "citation_id": 1,
+  "document_id": "doc_216872c3",
+  "filename": "travel-policy.pdf",
+  "chunk_id": "doc_216872c3_chunk_001",
+  "score": 0.7559,
+  "content": "Quartz travel reimbursement requires invoice and itinerary.",
+  "file_type": "pdf",
+  "page_number": 1,
+  "section": null
+}
+```
+
+相同提取内容再次上传时返回 409；删除文档会同时删除对应分块和向量。
 
 ## 开发与测试
 
@@ -183,6 +224,7 @@ $env:RUN_REAL_INTEGRATION='1'
 
 - 订单和库存工具当前使用内置参考适配器，没有连接外部订单系统。
 - 取消订单只生成并审核操作草稿；即使批准也不会执行外部写操作。
+- 文档解析支持可提取文字的 TXT、PDF 和 DOCX；不支持 OCR、扫描件识别、复杂版式还原或多模态内容。
 - 引用校验保证引用编号来自本次检索结果，但不等同于逐句事实一致性评估。
 - JWT 不加密，当前没有 Refresh Token、撤销列表、开放注册、登录限流或企业 OIDC。
 - 当前交付物是 Docker Compose 部署基线；公开网络部署前必须增加 HTTPS、入口限流、集中日志、指标告警和密钥托管。

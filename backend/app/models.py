@@ -13,6 +13,7 @@ class TextUploadRequest(BaseModel):
 class UploadResponse(BaseModel):
     document_id: str
     filename: str
+    file_type: str
     chunk_count: int
     status: str
 
@@ -20,6 +21,7 @@ class UploadResponse(BaseModel):
 class DocumentInfo(BaseModel):
     document_id: str
     filename: str
+    file_type: str = "txt"
     chunk_count: int
     preview: str
     content_hash: str | None = None
@@ -31,6 +33,9 @@ class ChunkInfo(BaseModel):
     chunk_id: str
     index: int
     content: str
+    file_type: str = "txt"
+    page_number: int | None = None
+    section: str | None = None
 
 
 class AskRequest(BaseModel):
@@ -45,6 +50,9 @@ class SourceInfo(BaseModel):
     chunk_id: str
     score: float
     content: str
+    file_type: str = "txt"
+    page_number: int | None = None
+    section: str | None = None
 
 
 class AskResponse(BaseModel):

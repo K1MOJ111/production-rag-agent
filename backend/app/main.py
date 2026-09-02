@@ -5,7 +5,7 @@ from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
 from .models import (
@@ -23,11 +23,11 @@ from .models import (
     UploadResponse,
 )
 from .config import Settings
-from .services.document_service import DocumentService
+from .services.document_service import DocumentService, MAX_UPLOAD_BYTES
 from .services.mock_embedding_service import MockEmbeddingService
 from .services.mock_llm_service import MockLLMService
 from .services.prompt_service import build_prompt, has_valid_citations
-from .services.vector_store import InMemoryVectorStore
+from .services.vector_store import DuplicateDocumentError, InMemoryVectorStore
 from .services.auth_service import AuthService, Principal, ROLES
 
 
@@ -118,9 +118,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="RAG Demo API",
-    description="Enterprise knowledge base API with mock and real RAG modes.",
-    version="0.6.0",
+    title="Enterprise RAG Agent API",
+    description="Knowledge retrieval and controlled business Agent service.",
+    version="0.7.0",
     lifespan=lifespan,
 )
 
@@ -216,7 +216,10 @@ def upload_document(
         document = document_service.add_text_document(
             filename=payload.filename,
             content=payload.content,
+            allow_existing=False,
         )
+    except DuplicateDocumentError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -225,6 +228,41 @@ def upload_document(
     return UploadResponse(
         document_id=document["document_id"],
         filename=document["filename"],
+        file_type=document["file_type"],
+        chunk_count=document["chunk_count"],
+        status="success",
+    )
+
+
+@app.post("/documents/upload-file", response_model=UploadResponse)
+async def upload_document_file(
+    file: UploadFile = File(...),
+    principal: Principal = Depends(get_current_principal),
+) -> UploadResponse:
+    require_role(principal, "admin")
+    filename = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if (
+        not filename
+        or len(filename) > 255
+        or any(ord(character) < 32 for character in filename)
+    ):
+        raise HTTPException(status_code=400, detail="invalid filename")
+    try:
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
+        document = document_service.add_file_document(filename, data)
+    except DuplicateDocumentError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="document indexing unavailable") from exc
+    finally:
+        await file.close()
+
+    return UploadResponse(
+        document_id=document["document_id"],
+        filename=document["filename"],
+        file_type=document["file_type"],
         chunk_count=document["chunk_count"],
         status="success",
     )
@@ -265,7 +303,14 @@ def list_document_chunks(
         raise HTTPException(status_code=404, detail="document not found")
 
     return [
-        ChunkInfo(chunk_id=chunk.chunk_id, index=chunk.index, content=chunk.content)
+        ChunkInfo(
+            chunk_id=chunk.chunk_id,
+            index=chunk.index,
+            content=chunk.content,
+            file_type=chunk.file_type,
+            page_number=chunk.page_number,
+            section=chunk.section,
+        )
         for chunk in chunks
     ]
 
