@@ -2,7 +2,8 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from app.services.agent_service import DEMO_ORDERS, LangGraphAgentService
+from app.services.agent_service import LangGraphAgentService
+from app.services.business_adapter import InMemoryBusinessAdapter
 
 
 class FakeCompletions:
@@ -38,8 +39,21 @@ class LangGraphAgentTest(unittest.TestCase):
         client = SimpleNamespace(
             chat=SimpleNamespace(completions=FakeCompletions())
         )
+        self.business = InMemoryBusinessAdapter(
+            {
+                "ORD-1001": {"status": "已发货", "sku": "SKU-A100", "quantity": 2},
+                "ORD-1002": {"status": "待处理", "sku": "SKU-B200", "quantity": 1},
+            },
+            {
+                "SKU-A100": {"available": 18, "warehouse": "深圳仓"},
+                "SKU-B200": {"available": 0, "warehouse": "深圳仓"},
+            },
+        )
         self.service = LangGraphAgentService(
-            "fake-model", lambda question: {"question": question}, client
+            "fake-model",
+            lambda question: {"question": question},
+            client,
+            self.business,
         )
         self.actor_id = "actor-a"
 
@@ -51,7 +65,6 @@ class LangGraphAgentTest(unittest.TestCase):
         self.assertEqual(result["used_tools"], ["get_order"])
 
     def test_sensitive_action_pauses_and_never_executes(self) -> None:
-        before = dict(DEMO_ORDERS["ORD-1002"])
         pending = self.service.run(
             self.actor_id, "confirm-thread", "取消订单 ORD-1002"
         )
@@ -66,9 +79,9 @@ class LangGraphAgentTest(unittest.TestCase):
         )
 
         self.assertEqual(completed["status"], "completed")
-        self.assertIn('"executed": false', completed["answer"])
+        self.assertIn('"executed": true', completed["answer"])
         self.assertEqual(completed["used_tools"], ["draft_order_cancellation"])
-        self.assertEqual(DEMO_ORDERS["ORD-1002"], before)
+        self.assertEqual(self.business.get_order("ORD-1002")["status"], "已取消")
 
     def test_inventory_tool_is_read_only(self) -> None:
         result = self.service.run(

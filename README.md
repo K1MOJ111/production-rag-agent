@@ -9,6 +9,7 @@
 - DeepSeek 基于检索资料生成回答；低相关问题拒答，回答引用必须匹配本次资料编号。
 - LangGraph Agent 编排知识检索、订单查询、库存查询和需人工确认的操作草稿。
 - Agent 检查点、线程归属和审计事件持久化到 PostgreSQL，服务重启后可以继续待确认流程。
+- 订单与库存通过 PostgreSQL 业务适配器读取；取消订单经人工批准后以单事务写入本地业务状态和审计。
 - PostgreSQL 本地用户、Argon2id 密码哈希、30分钟 Bearer JWT 和 RBAC 权限控制。
 - 存活/就绪检查、请求 ID、结构化耗时日志、非 root 容器运行和自动化测试。
 
@@ -28,14 +29,15 @@ FastAPI
   │    └─ DeepSeek + citation validation
   └─ LangGraph Agent
        ├─ knowledge_search
-       ├─ get_order
-       ├─ get_inventory
-       └─ draft_order_cancellation → human approval
-              │
-              ▼
+       ├─ get_order ────────────────┐
+       ├─ get_inventory ────────────┤
+       └─ draft_order_cancellation  │
+              → human approval ────┤
+                                   ▼
 PostgreSQL
   ├─ documents / rag_chunks
   ├─ users
+  ├─ orders / inventory / cancellation_requests
   ├─ LangGraph checkpoints
   └─ agent_threads / agent_audit_events
 ```
@@ -188,6 +190,17 @@ Mock 模式实际响应示例：
 
 相同提取内容再次上传时返回 409；删除文档会同时删除对应分块和向量。
 
+## 本地业务数据与受控写操作
+
+真实模式启动时会创建最小的 `orders`、`inventory` 和 `cancellation_requests` 表，并以 `ON CONFLICT DO NOTHING` 导入两条本地参考订单和库存。Agent 的 `get_order`、`get_inventory` 只通过业务适配器查询这些表，不在节点中直接写 SQL。
+
+取消流程分为两步：
+
+1. `draft_order_cancellation` 校验订单并生成草稿，通过 LangGraph `interrupt` 暂停；此时不写业务表。
+2. 原线程所属用户批准后，系统在同一事务中写入取消记录、把允许取消的订单更新为“已取消”，并记录包含 actor、thread、action、result 和 request_id 的审计事件。
+
+拒绝不会产生业务写入；`thread_id + action + order_id` 形成幂等键，进程恢复或重复执行不会重复取消。这里验证的是本地 PostgreSQL 业务系统集成，不代表已接入企业 ERP。
+
 ## 开发与测试
 
 `RAG_MODE=mock` 是确定性的本地测试适配器，不连接数据库和付费模型；真实运行使用 `RAG_MODE=real`。
@@ -207,7 +220,9 @@ cd backend
 $env:RUN_POSTGRES_INTEGRATION='1'
 ../.venv/Scripts/python.exe -m dotenv -f ../.env run -- `
   ../.venv/Scripts/python.exe -m unittest `
-  tests.test_m4_persistence tests.test_m6_auth.AuthPostgresTest -v
+  tests.test_m4_persistence tests.test_m6_auth.AuthPostgresTest `
+  tests.test_m7_documents.M7PostgresTest tests.test_m8_business `
+  tests.test_m8_api_auth -v
 ```
 
 真实检索、Eval 和 Agent 测试会产生少量模型费用，默认跳过：
@@ -222,8 +237,8 @@ $env:RUN_REAL_INTEGRATION='1'
 
 ## 数据与安全边界
 
-- 订单和库存工具当前使用内置参考适配器，没有连接外部订单系统。
-- 取消订单只生成并审核操作草稿；即使批准也不会执行外部写操作。
+- 订单、库存和取消记录属于本地 PostgreSQL 模拟业务系统；没有连接企业 ERP、支付、仓储或售后系统。
+- 取消订单批准后会真实更新本地数据库，但不会执行任何外部业务写操作。
 - 文档解析支持可提取文字的 TXT、PDF 和 DOCX；不支持 OCR、扫描件识别、复杂版式还原或多模态内容。
 - 引用校验保证引用编号来自本次检索结果，但不等同于逐句事实一致性评估。
 - JWT 不加密，当前没有 Refresh Token、撤销列表、开放注册、登录限流或企业 OIDC。

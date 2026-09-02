@@ -43,6 +43,10 @@ class M3RealAgentTest(unittest.TestCase):
             other_headers = headers(1)
             admin_headers = headers(2)
             thread_ids = []
+            with agent_service.business._engine.begin() as connection:
+                connection.execute(
+                    text("UPDATE orders SET status = '待处理' WHERE order_id = 'ORD-1002'")
+                )
             before = {
                 item["document_id"]
                 for item in client.get("/documents", headers=admin_headers).json()
@@ -56,8 +60,8 @@ class M3RealAgentTest(unittest.TestCase):
             try:
                 cases = [
                     ("请从知识库查询差旅报销需要什么材料？", "knowledge_search"),
-                    ("查询演示订单 ORD-1001 的状态。", "get_order"),
-                    ("查询演示库存 SKU-A100。", "get_inventory"),
+                    ("查询本地订单 ORD-1001 的状态。", "get_order"),
+                    ("查询本地库存 SKU-A100。", "get_inventory"),
                 ]
                 for message, expected_tool in cases:
                     thread_id = uuid4().hex
@@ -77,13 +81,20 @@ class M3RealAgentTest(unittest.TestCase):
                     "/agent/run",
                     json={
                         "thread_id": thread_id,
-                        "message": "请生成取消演示订单 ORD-1002 的草稿，原因是用户不再需要。",
+                        "message": "请生成取消本地订单 ORD-1002 的草稿，原因是用户不再需要。",
                     },
                     headers=operator_headers,
                 )
                 self.assertEqual(pending.status_code, 200, pending.text)
                 self.assertEqual(pending.json()["status"], "needs_confirmation")
                 self.assertFalse(pending.json()["pending_action"]["draft"]["executed"])
+
+                admin_confirm = client.post(
+                    "/agent/confirm",
+                    json={"thread_id": thread_id, "approved": True},
+                    headers=admin_headers,
+                )
+                self.assertEqual(admin_confirm.status_code, 403)
 
                 confirmed = client.post(
                     "/agent/confirm",
@@ -92,6 +103,7 @@ class M3RealAgentTest(unittest.TestCase):
                 )
                 self.assertEqual(confirmed.status_code, 200, confirmed.text)
                 self.assertEqual(confirmed.json()["status"], "completed")
+                self.assertIn('"executed": true', confirmed.json()["answer"])
                 self.assertIn(
                     "draft_order_cancellation", confirmed.json()["used_tools"]
                 )
@@ -126,10 +138,24 @@ class M3RealAgentTest(unittest.TestCase):
                 for thread_id in thread_ids:
                     agent_service._checkpointer.delete_thread(thread_id)
                     with agent_service._audit_engine.begin() as connection:
+                        connection.execute(
+                            text(
+                                "DELETE FROM cancellation_requests "
+                                "WHERE thread_id = :thread_id"
+                            ),
+                            {"thread_id": thread_id},
+                        )
                         connection.exec_driver_sql(
                             "DELETE FROM agent_threads WHERE thread_id = %s",
                             (thread_id,),
                         )
+                with agent_service.business._engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            "UPDATE orders SET status = '待处理' "
+                            "WHERE order_id = 'ORD-1002'"
+                        )
+                    )
                 with auth_service._engine.begin() as connection:
                     connection.execute(
                         text(

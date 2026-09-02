@@ -21,11 +21,13 @@
 LangGraph `StateGraph` 负责模型与工具之间的状态流转。当前工具包括：
 
 - `knowledge_search`：复用 RAG 检索链路。
-- `get_order`：通过内置参考适配器读取订单。
-- `get_inventory`：通过内置参考适配器读取库存。
+- `get_order`：通过业务适配器读取 PostgreSQL 订单。
+- `get_inventory`：通过业务适配器读取 PostgreSQL 库存。
 - `draft_order_cancellation`：生成取消草稿并触发人工确认。
 
-取消流程使用 LangGraph `interrupt` 暂停，通过 `Command` 恢复。PostgreSQL Checkpointer 保存完整执行状态，因此应用重启后仍可继续待确认流程。批准结果只记录草稿状态，不执行外部订单写操作。
+取消流程使用 LangGraph `interrupt` 暂停，通过 `Command` 恢复。PostgreSQL Checkpointer 保存完整执行状态，因此应用重启后仍可继续待确认流程。草稿阶段只读；批准后，PostgreSQL业务适配器在一个事务中写入 `cancellation_requests`、更新允许取消的订单状态并记录确认审计。幂等键由线程、动作和订单组成，节点重试不会重复执行。拒绝不写业务表。
+
+业务表和种子数据构成可本地验证的模拟业务系统，并非企业 ERP。Agent 只依赖业务适配器的小接口，SQL、事务、行锁、状态校验和幂等约束都集中在适配器内。
 
 ## 身份与授权
 
@@ -66,4 +68,4 @@ Docker Compose 包含 FastAPI 应用和 PostgreSQL+pgvector：
 - JWT 撤销或 Refresh Token 策略；
 - 集中日志、指标、链路追踪和告警；
 - 托管密钥服务和密钥轮换；
-- 真实订单/库存系统适配器及写操作幂等控制。
+- 企业 ERP 字段映射、调用认证、超时重试、对账与补偿策略。

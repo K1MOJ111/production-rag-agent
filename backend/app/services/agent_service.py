@@ -2,6 +2,7 @@ import json
 import operator
 from datetime import datetime, timezone
 from typing import Annotated, TypedDict
+from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -14,19 +15,13 @@ from psycopg.rows import dict_row
 from sqlalchemy import create_engine, text
 
 
-DEMO_ORDERS = {
-    "ORD-1001": {"status": "已发货", "sku": "SKU-A100", "quantity": 2},
-    "ORD-1002": {"status": "待处理", "sku": "SKU-B200", "quantity": 1},
-}
-DEMO_INVENTORY = {
-    "SKU-A100": {"available": 18, "warehouse": "深圳仓"},
-    "SKU-B200": {"available": 0, "warehouse": "深圳仓"},
-}
-
-
 class AgentState(TypedDict):
     messages: Annotated[list[dict], operator.add]
     used_tools: Annotated[list[str], operator.add]
+    actor_id: str
+    thread_id: str
+    request_id: str
+    finish_after_tools: bool
 
 
 TOOLS = [
@@ -46,7 +41,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_order",
-            "description": "查询演示订单，只读。",
+            "description": "从本地业务数据库查询订单，只读。",
             "parameters": {
                 "type": "object",
                 "properties": {"order_id": {"type": "string"}},
@@ -58,7 +53,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_inventory",
-            "description": "查询演示库存，只读。",
+            "description": "从本地业务数据库查询库存，只读。",
             "parameters": {
                 "type": "object",
                 "properties": {"sku": {"type": "string"}},
@@ -70,7 +65,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "draft_order_cancellation",
-            "description": "生成取消订单草稿；必须人工确认，且不会实际取消订单。",
+            "description": "生成取消订单草稿；人工批准后仅更新本地业务数据库。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -90,11 +85,13 @@ class LangGraphAgentService:
         model: str,
         knowledge_search,
         client: OpenAI,
+        business_adapter,
         database_url: str | None = None,
     ) -> None:
         self.model = model
         self.knowledge_search = knowledge_search
         self.client = client
+        self.business = business_adapter
         self._thread_actors: dict[str, str] = {}
         self._audit_entries: list[dict] = []
         self._checkpoint_connection = None
@@ -121,33 +118,79 @@ class LangGraphAgentService:
             "agent",
             lambda state: "tools" if state["messages"][-1].get("tool_calls") else END,
         )
-        graph.add_edge("tools", "agent")
+        graph.add_conditional_edges(
+            "tools",
+            lambda state: END if state.get("finish_after_tools") else "agent",
+        )
         self.graph = graph.compile(checkpointer=checkpointer)
 
-    def run(self, actor_id: str, thread_id: str, message: str) -> dict:
+    def run(
+        self,
+        actor_id: str,
+        thread_id: str,
+        message: str,
+        request_id: str | None = None,
+    ) -> dict:
+        request_id = request_id or str(uuid4())
         self._claim_thread(actor_id, thread_id)
         config = {"configurable": {"thread_id": thread_id}}
         if self.graph.get_state(config).next:
             raise ValueError("thread is waiting for confirmation")
         result = self.graph.invoke(
-            {"messages": [{"role": "user", "content": message}]}, config=config
+            {
+                "messages": [{"role": "user", "content": message}],
+                "actor_id": actor_id,
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "finish_after_tools": False,
+            },
+            config=config,
         )
         output = self._result(thread_id, result)
-        self._record_audit(actor_id, thread_id, "run", output)
+        pending = (output.get("pending_action") or {}).get("draft", {})
+        self._record_audit(
+            actor_id,
+            thread_id,
+            "run",
+            output,
+            {
+                "request_id": request_id,
+                "action": pending.get("action", "agent_run"),
+                "result": output["status"],
+            },
+        )
         return output
 
-    def confirm(self, actor_id: str, thread_id: str, approved: bool) -> dict:
+    def confirm(
+        self,
+        actor_id: str,
+        thread_id: str,
+        approved: bool,
+        request_id: str | None = None,
+    ) -> dict:
+        request_id = request_id or str(uuid4())
         self._require_owner(actor_id, thread_id)
         config = {"configurable": {"thread_id": thread_id}}
         if not self.graph.get_state(config).next:
             raise ValueError("thread is not waiting for confirmation")
         result = self.graph.invoke(
-            Command(resume={"approved": approved}), config=config
+            Command(resume={"approved": approved, "request_id": request_id}),
+            config=config,
         )
         output = self._result(thread_id, result)
-        self._record_audit(
-            actor_id, thread_id, "confirm", output, {"approved": approved}
-        )
+        if not approved or not self.business.records_audit:
+            self._record_audit(
+                actor_id,
+                thread_id,
+                "confirm",
+                output,
+                {
+                    "approved": approved,
+                    "request_id": request_id,
+                    "action": "cancel_order",
+                    "result": "executed" if approved else "rejected",
+                },
+            )
         return output
 
     def list_audit(
@@ -179,10 +222,12 @@ class LangGraphAgentService:
             self._checkpoint_connection.close()
         if self._audit_engine:
             self._audit_engine.dispose()
+        self.business.close()
 
     def check_ready(self) -> None:
         if self._checkpoint_connection:
             self._checkpoint_connection.execute("SELECT 1").fetchone()
+        self.business.check_ready()
 
     def _ensure_audit_schema(self) -> None:
         with self._audit_engine.begin() as connection:
@@ -269,7 +314,7 @@ class LangGraphAgentService:
         output: dict,
         details: dict | None = None,
     ) -> None:
-        details = details or {}
+        details = dict(details or {})
         if output.get("pending_action"):
             details["pending_action"] = output["pending_action"]
         entry = {
@@ -315,8 +360,8 @@ class LangGraphAgentService:
                     "role": "system",
                     "content": (
                         "你是企业业务助手，必须通过工具获取知识库、订单和库存事实。"
-                        "订单与库存是演示数据。取消订单只能生成草稿并等待人工确认；"
-                        "即使草稿获批，也不得声称订单已实际取消。"
+                        "订单与库存来自本地业务数据库模拟。取消订单必须先生成草稿；"
+                        "只有人工批准后才能更新本地业务状态，不得声称已调用外部 ERP。"
                     ),
                 },
                 *state["messages"],
@@ -343,25 +388,24 @@ class LangGraphAgentService:
 
     def _run_tools(self, state: AgentState) -> dict:
         messages = []
+        finish_after_tools = False
         for call in state["messages"][-1]["tool_calls"]:
             name = call["function"]["name"]
             arguments = json.loads(call["function"]["arguments"])
             if name == "knowledge_search":
                 result = self.knowledge_search(arguments["question"])
             elif name == "get_order":
-                result = DEMO_ORDERS.get(arguments["order_id"], {"error": "订单不存在"})
+                result = self.business.get_order(arguments["order_id"])
             elif name == "get_inventory":
-                result = DEMO_INVENTORY.get(arguments["sku"], {"error": "SKU 不存在"})
+                result = self.business.get_inventory(arguments["sku"])
             elif name == "draft_order_cancellation":
-                if arguments["order_id"] not in DEMO_ORDERS:
-                    result = {"error": "订单不存在，未生成草稿"}
+                finish_after_tools = True
+                draft = self.business.draft_cancellation(
+                    arguments["order_id"], arguments["reason"]
+                )
+                if "error" in draft:
+                    result = draft
                 else:
-                    draft = {
-                        "action": "cancel_order",
-                        "order_id": arguments["order_id"],
-                        "reason": arguments["reason"],
-                        "executed": False,
-                    }
                     review = interrupt(
                         {
                             "type": "confirmation",
@@ -369,11 +413,21 @@ class LangGraphAgentService:
                             "draft": draft,
                         }
                     )
-                    result = {
-                        **draft,
-                        "approved": bool(review.get("approved")),
-                        "note": "草稿已记录但未执行任何订单操作。",
-                    }
+                    approved = bool(review.get("approved"))
+                    if approved:
+                        result = self.business.approve_cancellation(
+                            state["actor_id"],
+                            state["thread_id"],
+                            draft,
+                            review.get("request_id") or state["request_id"],
+                        )
+                    else:
+                        result = {
+                            **draft,
+                            "approved": False,
+                            "executed": False,
+                            "note": "草稿已拒绝，未写入本地业务数据。",
+                        }
             else:
                 result = {"error": f"unsupported tool: {name}"}
             messages.append(
@@ -387,6 +441,7 @@ class LangGraphAgentService:
         return {
             "messages": messages,
             "used_tools": [message["name"] for message in messages],
+            "finish_after_tools": finish_after_tools,
         }
 
     @staticmethod

@@ -47,6 +47,7 @@ if settings.rag_mode == "real":
     from .services.dashscope_rerank_service import DashScopeRerankService
     from .services.postgres_vector_store import PostgresVectorStore
     from .services.agent_service import LangGraphAgentService
+    from .services.business_adapter import PostgresBusinessAdapter
 
     embedder = DashScopeEmbeddingService(
         api_key=settings.dashscope_api_key,
@@ -96,10 +97,12 @@ if settings.rag_mode == "real":
             ],
         }
 
+    business_adapter = PostgresBusinessAdapter(settings.database_url)
     agent_service = LangGraphAgentService(
         settings.deepseek_model,
         agent_knowledge_search,
         llm_service.client,
+        business_adapter,
         settings.database_url,
     )
 else:
@@ -120,7 +123,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Enterprise RAG Agent API",
     description="Knowledge retrieval and controlled business Agent service.",
-    version="0.7.0",
+    version="0.8.0",
     lifespan=lifespan,
 )
 
@@ -128,6 +131,7 @@ app = FastAPI(
 @app.middleware("http")
 async def log_request(request: Request, call_next):
     request_id = str(uuid4())
+    request.state.request_id = request_id
     started = perf_counter()
     status = 500
     try:
@@ -386,6 +390,7 @@ def ask_question(
 @app.post("/agent/run", response_model=AgentResponse)
 def run_agent(
     payload: AgentRunRequest,
+    request: Request,
     principal: Principal = Depends(get_current_principal),
 ) -> AgentResponse:
     require_role(principal, "operator")
@@ -393,7 +398,12 @@ def run_agent(
         raise HTTPException(status_code=503, detail="agent requires real mode")
     try:
         return AgentResponse(
-            **agent_service.run(principal.user_id, payload.thread_id, payload.message)
+            **agent_service.run(
+                principal.user_id,
+                payload.thread_id,
+                payload.message,
+                request.state.request_id,
+            )
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -406,6 +416,7 @@ def run_agent(
 @app.post("/agent/confirm", response_model=AgentResponse)
 def confirm_agent(
     payload: AgentConfirmRequest,
+    request: Request,
     principal: Principal = Depends(get_current_principal),
 ) -> AgentResponse:
     require_role(principal, "operator")
@@ -414,7 +425,10 @@ def confirm_agent(
     try:
         return AgentResponse(
             **agent_service.confirm(
-                principal.user_id, payload.thread_id, payload.approved
+                principal.user_id,
+                payload.thread_id,
+                payload.approved,
+                request.state.request_id,
             )
         )
     except PermissionError as exc:

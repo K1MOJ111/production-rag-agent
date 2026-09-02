@@ -78,4 +78,16 @@
 - 偏离检查：无。继续复用现有 DocumentService、PostgreSQL 和检索链路，只增加 pypdf、python-docx 两个必要解析依赖；没有引入多Agent、对象存储、OCR或前端。
 - 门禁结论：通过。下一阶段是 M8 本地 PostgreSQL 业务数据适配器与受控写操作。
 
+## M8：本地业务数据适配器与安全写操作
+
+- 状态：完成。
+- 已完成：新增 `orders`、`inventory`、`cancellation_requests` 表和PostgreSQL业务适配器；订单、库存工具不再读取Agent节点内置字典。真实模式启动时以冲突忽略方式导入最小参考数据。
+- 写操作门禁：取消工具只生成草稿并中断；拒绝不写业务表；批准时重新校验订单状态和线程所有者，在一个事务内更新订单、写取消记录和确认审计。
+- 幂等与恢复：`thread_id + action + order_id` 唯一约束防止重试重复取消；PostgresSaver恢复后仍由原用户确认，重复确认返回冲突，其他用户（包括admin）不能代确认。
+- 审计：运行与确认事件可追踪 actor、thread、action、result 和 request_id；批准事件与本地业务状态共享事务。
+- 已验证：普通测试36项中27项通过、9项按环境开关跳过；M4/M6/M7/M8 PostgreSQL无付费套件6项全部通过，其中M8覆盖查询、草稿、批准、拒绝、幂等、viewer/admin越权和重启恢复；Docker镜像重建成功，应用与PostgreSQL容器均健康，真实模式 `/ready` 返回数据库就绪。真实模型Agent回归保留测试但本阶段未运行，不能记为本次通过。
+- 业务边界：这是本地PostgreSQL模拟业务系统与真实数据库写入，不是企业ERP接入；没有外部订单、支付、仓储或售后副作用。
+- 偏离检查：无。业务seam只有PostgreSQL运行适配器和内存测试适配器，继续使用单Agent、单PostgreSQL和既有权限/审计；未加入消息队列、分布式事务或额外服务。
+- 门禁结论：通过。下一阶段是 M9 可量化Eval与分阶段运行指标。
+
 一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、[LangGraph PostgreSQL memory](https://docs.langchain.com/oss/python/langgraph/add-memory)、[FastAPI JWT](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/)、[OAuth 2.0 Security BCP](https://www.rfc-editor.org/rfc/rfc9700.html)、[OWASP JWT](https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html)。
