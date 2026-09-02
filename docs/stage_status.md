@@ -28,9 +28,9 @@
 ## M3：单 Agent 与人工确认
 
 - 状态：完成。
-- 已完成：单个 LangGraph `StateGraph`、知识检索工具、演示订单/库存只读工具、取消订单草稿、`interrupt`/`Command` 人工确认、API 和 `used_tools` 审计字段。
+- 已完成：单个 LangGraph `StateGraph`、知识检索工具、内置订单/库存只读参考适配器、取消订单草稿、`interrupt`/`Command` 人工确认、API 和 `used_tools` 审计字段。
 - 已验证：本地 Agent 的订单、库存、批准、拒绝和不执行副作用测试通过；真实 DeepSeek 工具调用覆盖四个工具及中断恢复流程。
-- 数据边界：订单和库存为明确的代码内演示数据；批准草稿后仍为 `executed=false`，未连接任何真实业务系统。
+- 数据边界：订单和库存来自代码内参考数据；批准草稿后仍为 `executed=false`，未连接任何外部业务系统。
 - 运行边界：检查点使用进程内 `InMemorySaver`，服务重启后待确认线程不会保留；持久化、用户隔离和审计应在后续生产化阶段完成。
 - 偏离检查：无。仍是单 Agent；没有多 Agent、MCP、真实写操作或未经确认的副作用。
 - 门禁结论：通过，已进入 M4。
@@ -52,7 +52,7 @@
 - 已验证：普通测试 25 项中 21 项通过、4 项真实链路按环境开关跳过；Compose 配置校验通过；镜像构建成功；mock 容器和真实模式 Compose 容器均返回 200；真实模式报告 `database=ok`，容器健康、非 root 运行且日志可见。
 - 运行边界：`/ready` 不调用付费模型 API，只验证当前必要的数据库依赖；日志输出到标准输出，尚未接入指标、链路追踪或集中日志平台。
 - 部署边界：完成的是本机 Docker/Compose 可运行证据，不是云端或公司生产环境部署。
-- 偏离检查：无。继续使用标准库日志、现有 FastAPI 和 Docker Compose，没有为演示项目增加 Prometheus、OpenTelemetry、Kubernetes 或云资源。
+- 偏离检查：无。继续使用标准库日志、现有 FastAPI 和 Docker Compose，没有在当前部署范围内引入 Prometheus、OpenTelemetry、Kubernetes 或云资源。
 - 门禁结论：通过。M0-M5 既定升级阶段完成；后续认证、真实业务系统或目标部署环境都需要先确定具体边界，不能自动视为已完成。
 
 ## M6：本地认证与角色权限
@@ -64,6 +64,6 @@
 - 本机状态：随机 `JWT_SECRET` 已写入被 Git 忽略的 `.env`；首个管理员尚未创建，因为管理员密码必须由用户在终端隐藏输入。
 - 安全边界：JWT不加密且没有撤销列表；未实现 Refresh Token、开放注册、第三方登录、登录限流或账号锁定。公开部署前必须配置 HTTPS 和网关限流。
 - 偏离检查：无。认证通过单一 `Principal(user_id, role)` seam 接入，复用 M4 线程归属和审计，没有把 JWT 逻辑放入 Agent，也没有搭建不需要的完整 OAuth 授权服务器。
-- 门禁结论：通过。M0-M6 已形成可运行、可验证的本地生产化案例；真实业务接入和外部部署仍需单独确定目标系统与授权边界。
+- 门禁结论：通过。M0-M6 已形成可运行、可验证的本地部署与安全基线；真实业务接入和外部部署仍需单独确定目标系统与授权边界。
 
 一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、[LangGraph PostgreSQL memory](https://docs.langchain.com/oss/python/langgraph/add-memory)、[FastAPI JWT](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/)、[OAuth 2.0 Security BCP](https://www.rfc-editor.org/rfc/rfc9700.html)、[OWASP JWT](https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html)。
