@@ -93,7 +93,12 @@ class FakeCompletionsApi:
     def create(self, **kwargs):
         self.calls.append(kwargs)
         message = SimpleNamespace(content="制度要求提交发票。[资料 1]")
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        usage = SimpleNamespace(
+            prompt_tokens=120, completion_tokens=30, total_tokens=150
+        )
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message)], usage=usage
+        )
 
 
 class DeepSeekLLMServiceTest(unittest.TestCase):
@@ -118,6 +123,17 @@ class DeepSeekLLMServiceTest(unittest.TestCase):
         self.assertIn("[资料 1]", answer)
         self.assertEqual(completions.calls[0]["model"], "deepseek-test")
         self.assertIn("只能依据", completions.calls[0]["messages"][0]["content"])
+
+        measured_answer, usage = service.generate_answer_with_usage(
+            question="如何报销？",
+            sources=[{"citation_id": 1}],
+            prompt="参考资料：[资料 1]",
+        )
+        self.assertIn("[资料 1]", measured_answer)
+        self.assertEqual(
+            usage,
+            {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
+        )
 
 
 class DocumentHashTest(unittest.TestCase):

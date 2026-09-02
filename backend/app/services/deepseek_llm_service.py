@@ -18,8 +18,17 @@ class DeepSeekLLMService:
         )
 
     def generate_answer(self, question: str, sources: list[dict], prompt: str) -> str:
+        answer, _ = self.generate_answer_with_usage(question, sources, prompt)
+        return answer
+
+    def generate_answer_with_usage(
+        self, question: str, sources: list[dict], prompt: str
+    ) -> tuple[str, dict[str, int] | None]:
         if not sources:
-            return "我没有在知识库中检索到足够相关的资料，所以不能基于企业文档回答这个问题。"
+            return (
+                "我没有在知识库中检索到足够相关的资料，所以不能基于企业文档回答这个问题。",
+                None,
+            )
 
         response = self.client.chat.completions.create(
             model=self.model,
@@ -36,4 +45,13 @@ class DeepSeekLLMService:
         answer = response.choices[0].message.content
         if not answer or not answer.strip():
             raise RuntimeError("DeepSeek returned an empty answer")
-        return answer.strip()
+        usage = getattr(response, "usage", None)
+        return answer.strip(), (
+            {
+                "prompt_tokens": int(usage.prompt_tokens),
+                "completion_tokens": int(usage.completion_tokens),
+                "total_tokens": int(usage.total_tokens),
+            }
+            if usage
+            else None
+        )

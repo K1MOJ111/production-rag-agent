@@ -11,7 +11,7 @@
 - Agent 检查点、线程归属和审计事件持久化到 PostgreSQL，服务重启后可以继续待确认流程。
 - 订单与库存通过 PostgreSQL 业务适配器读取；取消订单经人工批准后以单事务写入本地业务状态和审计。
 - PostgreSQL 本地用户、Argon2id 密码哈希、30分钟 Bearer JWT 和 RBAC 权限控制。
-- 存活/就绪检查、请求 ID、结构化耗时日志、非 root 容器运行和自动化测试。
+- 版本化 RAG/Agent Eval、分阶段耗时、LLM Token/成本记录、存活/就绪检查和自动化测试。
 
 ## 系统架构
 
@@ -58,7 +58,7 @@ PostgreSQL
 | 认证 | PyJWT、Argon2id、Bearer Token、RBAC |
 | 数据访问 | SQLAlchemy、psycopg、langchain-postgres |
 | 运行 | Docker、Docker Compose、结构化日志、健康检查 |
-| 质量 | unittest、固定检索 Eval、真实集成测试 |
+| 质量 | unittest、36题版本化 Eval、Recall@K、MRR、拒答/引用/Agent 安全评估 |
 
 ## 权限模型
 
@@ -225,7 +225,27 @@ $env:RUN_POSTGRES_INTEGRATION='1'
   tests.test_m8_api_auth -v
 ```
 
-真实检索、Eval 和 Agent 测试会产生少量模型费用，默认跳过：
+运行确定性的免费 Eval：
+
+```powershell
+cd backend
+../.venv/Scripts/python.exe -m evals.run_eval --mode mock
+```
+
+报告按运行时间分别写入 `backend/evals/results/` 的 JSON 和 Markdown 文件，不覆盖既有结果。当前仓库保存的实际 Mock 报告为 [`m9-mock-20260902T091204641448Z.md`](backend/evals/results/m9-mock-20260902T091204641448Z.md)：36题中25题通过；Recall@3、MRR@3、来源匹配率和已回答问题的引用合法率均为1.0，拒答准确率为0.6944；确定性 Agent 场景7/7通过。失败集中在2道口语改写误拒答，以及无关/诱导问题在Mock低阈值下的误接受。该结果是本地回归基线，不代表真实模型质量或线上指标。
+
+显式运行真实 Eval 会调用 PostgreSQL、百炼和 DeepSeek，并产生模型费用：
+
+```powershell
+cd backend
+$env:RUN_REAL_EVAL='1'
+../.venv/Scripts/python.exe -m dotenv -f ../.env run -- `
+  ../.venv/Scripts/python.exe -m evals.run_eval --mode real
+```
+
+真实报告记录供应商响应中的 LLM Token。若在 `.env` 配置每百万输入/输出 Token 单价，则同时计算估算成本；Embedding、Rerank 或供应商未返回的用量会明确标记为不可用，不做推测。
+
+以下真实集成测试同样会产生少量模型费用，默认跳过：
 
 ```powershell
 cd backend
@@ -241,6 +261,7 @@ $env:RUN_REAL_INTEGRATION='1'
 - 取消订单批准后会真实更新本地数据库，但不会执行任何外部业务写操作。
 - 文档解析支持可提取文字的 TXT、PDF 和 DOCX；不支持 OCR、扫描件识别、复杂版式还原或多模态内容。
 - 引用校验保证引用编号来自本次检索结果，但不等同于逐句事实一致性评估。
+- 当前提交仅运行并保存了 Mock Eval；真实 Eval 尚未运行，不能据此声称真实模型准确率、延迟或成本。
 - JWT 不加密，当前没有 Refresh Token、撤销列表、开放注册、登录限流或企业 OIDC。
 - 当前交付物是 Docker Compose 部署基线；公开网络部署前必须增加 HTTPS、入口限流、集中日志、指标告警和密钥托管。
 

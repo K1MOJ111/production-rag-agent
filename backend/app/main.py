@@ -123,7 +123,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Enterprise RAG Agent API",
     description="Knowledge retrieval and controlled business Agent service.",
-    version="0.8.0",
+    version="0.9.0",
     lifespan=lifespan,
 )
 

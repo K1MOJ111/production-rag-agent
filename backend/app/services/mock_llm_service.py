@@ -1,6 +1,11 @@
 class MockLLMService:
     """Deterministic answer adapter for offline tests."""
 
+    def generate_answer_with_usage(
+        self, question: str, sources: list[dict], prompt: str
+    ) -> tuple[str, None]:
+        return self.generate_answer(question, sources, prompt), None
+
     def generate_answer(self, question: str, sources: list[dict], prompt: str) -> str:
         if not sources:
             return (
@@ -20,3 +25,8 @@ class MockLLMService:
             f"{evidence}。依据主要来自《{best_source['filename']}》"
             f"的{location}。[资料 {best_source['citation_id']}]"
         )
+
+    def generate_answer_with_usage(
+        self, question: str, sources: list[dict], prompt: str
+    ) -> tuple[str, None]:
+        return self.generate_answer(question, sources, prompt), None

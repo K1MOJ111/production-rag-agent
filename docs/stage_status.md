@@ -90,4 +90,17 @@
 - 偏离检查：无。业务seam只有PostgreSQL运行适配器和内存测试适配器，继续使用单Agent、单PostgreSQL和既有权限/审计；未加入消息队列、分布式事务或额外服务。
 - 门禁结论：通过。下一阶段是 M9 可量化Eval与分阶段运行指标。
 
+## M9：可量化 Eval 与运行指标
+
+- 状态：完成。
+- 数据集：新增 `m9-v1` 版本化36题集合，覆盖精确问法、口语改写、关键词、跨文档、无关问题和诱导回答；原M2的5题记录及测试入口保留，未覆盖历史证据。
+- 指标与报告：一条命令生成带模型配置、阈值、时间和失败案例的JSON/Markdown报告；计算Recall@3、MRR@3、拒答准确率、引用编号合法率、来源匹配率和总通过率，并记录Embedding、检索、Rerank、LLM分阶段耗时。
+- Agent评估：确定性Mock覆盖knowledge_search、get_order、get_inventory工具路由，取消草稿必须暂停、越权确认失败、拒绝不写入和批准后写入，共7项全部通过。
+- Token与成本：真实模式读取DeepSeek响应中的输入、输出和总Token；只有显式配置每百万Token单价时才估算成本。Embedding、Rerank或供应商未返回的用量明确标记为不可用，不推测数据。
+- 已验证：普通测试39项中30项通过、9项真实/PostgreSQL链路按环境开关跳过；M4/M6/M7/M8 PostgreSQL无付费套件6/6通过；Docker镜像构建和容器内Mock Eval通过，重建应用健康且`/ready`返回数据库就绪，OpenAPI版本为0.9.0。实际Mock报告36题中25题通过：Recall@3=1.0、MRR@3=1.0、拒答准确率=0.6944、引用合法率=1.0、来源匹配率=1.0；Agent 7/7通过。真实Eval本阶段未运行，不能记为真实模型结果。
+- 兼容性提示：PostgreSQL套件仍出现已记录的Python 3.14事件循环弃用提示和进程退出时psycopg未关闭连接警告；未导致测试失败，但不能记为无警告运行。
+- 失败证据：2道口语改写在0.1阈值下被误拒答；4道无关问题和5道诱导问题被Mock字符相似度误接受。报告保留全部case、最高分和失败ID，后续真实Eval用于判断问题来自Mock局限、阈值或真实检索链路。
+- 偏离检查：无。继续使用单Agent、现有PostgreSQL和已有模型适配器；普通测试与默认Eval不访问付费API，未引入评测平台、监控服务或虚构指标。
+- 门禁结论：通过。下一阶段是M10 GitHub持续集成、快速验证路径和公开仓库安全检查。
+
 一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、[LangGraph PostgreSQL memory](https://docs.langchain.com/oss/python/langgraph/add-memory)、[FastAPI JWT](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/)、[OAuth 2.0 Security BCP](https://www.rfc-editor.org/rfc/rfc9700.html)、[OWASP JWT](https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html)。
