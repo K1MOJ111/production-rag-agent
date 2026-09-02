@@ -5,7 +5,9 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("MOCK_ADMIN_PASSWORD", "mock-admin-only-123!")
+MOCK_ADMIN_PASSWORD = os.environ.setdefault(
+    "MOCK_ADMIN_PASSWORD", "mock-admin-only-123!"
+)
 
 from app.main import app, auth_service
 from app.services.chunk_service import clean_text, split_into_chunks
@@ -123,7 +125,7 @@ class BaselineApiTest(unittest.TestCase):
             "/auth/token",
             data={
                 "username": "mock-admin",
-                "password": "mock-admin-only-123!",
+                "password": MOCK_ADMIN_PASSWORD,
             },
         )
 
