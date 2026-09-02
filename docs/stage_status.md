@@ -105,7 +105,7 @@
 
 ## M10：持续集成与仓库可验证性
 
-- 状态：本地实现与验证完成；远端GitHub Actions修复后待再次验证。
+- 状态：完成。
 - 持续集成：新增GitHub Actions工作流，在Python 3.12上运行普通测试、免费Mock Eval、`pip check`和仓库内容检查；工作流不读取仓库Secret、不调用付费模型，`GITHUB_TOKEN`仅授予`contents: read`。
 - 快速验证：Mock模式可通过环境变量创建仅限本机的临时管理员；README提供3分钟免费启动、Swagger验证步骤、真实请求/响应摘录和5分钟真实模式核心链路检查。
 - 架构与边界：README开头明确业务问题、方案、技术栈和真实边界；架构文档补充完整RAG链路及Agent人工确认流程；明确列出已完成、未实现和公网生产前缺口。
@@ -113,9 +113,9 @@
 - 安全检查：新增零依赖仓库检查脚本，扫描Git跟踪文件中的`.env`、私钥、JWT、常见API密钥格式和本机绝对路径；测试验证安全仓库通过、强制跟踪`.env`时失败。
 - 已验证：普通测试41项中32项通过、9项按环境开关跳过；PostgreSQL无付费套件6/6通过；免费Mock Eval为RAG 25/36、Agent 7/7；`pip check`和Compose配置校验通过。未运行付费模型或真实Eval。
 - 兼容性提示：PostgreSQL套件仍有已记录的Python 3.14事件循环弃用提示和进程退出时psycopg连接警告；未导致失败，但不能记为无警告运行。
-- 远端记录：首次运行`33636926024`在普通测试阶段失败，原因是测试保留了CI注入的Mock密码，却用本地固定密码登录；认证实现未失败。测试已改为读取实际环境值，并用不同的CI模拟密码在本地重跑41项测试通过，不能把首次运行覆盖或记为通过。
-- 发布边界：M7-M10已推送到公开仓库；修复提交需再次推送并以新的GitHub Actions结果作为远端门禁证据。
+- 远端记录：首次运行`33636926024`在普通测试阶段失败，原因是测试保留了CI注入的Mock密码，却用本地固定密码登录；认证实现未失败。该失败记录保留。修复后运行`33637190912`全部通过：Linux普通测试41项中31项通过、10项按环境或平台跳过，Mock Eval为RAG 25/36、Agent 7/7，仓库检查55个跟踪文件通过。
+- 发布边界：M7-M10及CI环境修复已推送到公开仓库；远端工作流不使用付费模型和仓库Secret。
 - 偏离检查：无。继续使用单Agent、单PostgreSQL、FastAPI Swagger和现有测试结构；未增加前端、多Agent、外部业务系统、云部署或付费CI步骤。
-- 门禁结论：本地门禁通过；远端门禁等待修复提交推送后的GitHub Actions结果。
+- 门禁结论：通过。M7-M10既定升级阶段完成；后续只在明确需求下评估MCP或实际部署目标。
 
 一手依据：[langchain-postgres](https://github.com/langchain-ai/langchain-postgres)、[百炼 Embedding](https://help.aliyun.com/zh/model-studio/embedding)、[百炼 Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)、[DeepSeek API](https://api-docs.deepseek.com/zh-cn/)、[LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)、[LangGraph PostgreSQL memory](https://docs.langchain.com/oss/python/langgraph/add-memory)、[FastAPI JWT](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/)、[OAuth 2.0 Security BCP](https://www.rfc-editor.org/rfc/rfc9700.html)、[OWASP JWT](https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html)。
