@@ -1,6 +1,10 @@
-# 企业级 RAG 与业务 Agent 服务
+# 企业文档 RAG 与业务 Agent 服务
 
-面向企业内部知识检索与受控业务操作的 API 服务。系统提供文档入库、混合检索、Rerank、基于证据的回答、工具调用、人工确认、状态持久化、审计和角色权限控制，并支持 Docker Compose 部署。
+[![CI](https://github.com/K1MOJ111/production-rag-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/K1MOJ111/production-rag-agent/actions/workflows/ci.yml)
+
+企业制度分散在不同文件中，普通问答容易编造来源，业务操作又不能绕过权限和人工确认。本服务用可追溯RAG回答文档问题，并用单个LangGraph工作流安全编排知识检索、订单、库存和取消草稿。核心实现为FastAPI、PostgreSQL/pgvector、混合检索、百炼Embedding/Rerank、DeepSeek、JWT/RBAC、PostgreSQL Checkpointer和Docker Compose。
+
+当前仓库是可本地运行和验证的生产化实现基线，不代表已在企业生产环境或公网部署；订单和库存属于本地PostgreSQL模拟业务系统，真实模式会调用付费模型API。
 
 ## 核心能力
 
@@ -68,46 +72,42 @@ PostgreSQL
 
 JWT 仅保存用户 UUID 和必要标准声明。服务严格验证 `sub`、`exp`、`iss`、`aud` 和签名算法，并在每次请求中查询数据库获取最新角色和启用状态。
 
-## 快速启动
+## 3分钟本地体验（免费 Mock）
 
-### 1. 配置环境
+Mock模式不连接数据库或付费模型，只用于验证API、文档入库、检索、拒答和引用链路。应用仅绑定本机地址；不要把Mock模式或Mock账号暴露到公网。
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-在 `.env` 中设置：
-
-- `RAG_MODE=real`
-- PostgreSQL 连接配置
-- 百炼和 DeepSeek API 配置
-- 至少32字节的随机 `JWT_SECRET`
-
-生成 JWT 密钥：
-
-```powershell
-[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-```
-
-真实密钥只能保存在被 Git 忽略的 `.env` 中。
-
-### 2. 启动服务
+在 `.env` 的 `MOCK_ADMIN_PASSWORD` 填入一个仅用于本机、长度12–128位的临时密码，保留 `RAG_MODE=mock`，然后启动：
 
 ```powershell
 docker compose --profile app up -d --build
+Invoke-RestMethod http://127.0.0.1:8000/health
 ```
 
-检查运行状态：
+打开 `http://127.0.0.1:8000/docs`：
+
+1. 点击 **Authorize**，用户名填写 `mock-admin`，密码使用刚设置的本机临时密码。
+2. 执行 `POST /documents/load-samples`，一次导入仓库内3份样例制度。
+3. 执行 `POST /qa/ask`，请求体填写 `{"question":"差旅报销需要准备哪些材料？","top_k":3}`。
+4. 再询问“火星基地什么时候开放？”，确认返回 `is_refused=true`。
+
+![Swagger Mock健康检查](output/playwright/swagger-health-mock.png)
+
+截图由本地Mock服务的Swagger实际执行 `/health` 后生成；响应为HTTP 200、`mode=mock`。
+
+## 真实模式配置
+
+在被Git忽略的 `.env` 中设置 `RAG_MODE=real`、PostgreSQL连接、百炼和DeepSeek API配置，以及至少32字节的随机 `JWT_SECRET`：
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
-Invoke-RestMethod http://127.0.0.1:8000/ready
-docker compose --profile app ps
+[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+docker compose --profile app up -d --build
 ```
 
-接口文档：`http://127.0.0.1:8000/docs`
-
-### 3. 创建首个管理员
+创建首个管理员：
 
 ```powershell
 cd backend
@@ -115,22 +115,17 @@ cd backend
   ../.venv/Scripts/python.exe -m app.create_user admin --role admin
 ```
 
-密码通过终端隐藏输入，不会进入命令历史。
+密码通过终端隐藏输入，不进入命令历史。`POST /auth/token` 使用表单字段 `username` 和 `password` 换取短期JWT，后续请求携带 `Authorization: Bearer <access_token>`。
 
-### 4. 获取 Access Token
+## 5分钟核心链路验证（已配置真实模式）
 
-`POST /auth/token` 使用 `application/x-www-form-urlencoded`：
+1. 在Swagger中登录管理员，执行 `POST /documents/load-samples` 和 `POST /qa/ask`，检查来源文件及引用编号。
+2. 用CLI创建一个 `operator`，登录后执行 `POST /agent/run`：`{"thread_id":"verify-cancel-001","message":"取消订单 ORD-1002，原因是重复下单"}`。
+3. 确认首次响应为 `needs_confirmation`，并且草稿中的 `executed=false`。
+4. 执行 `POST /agent/confirm`：`{"thread_id":"verify-cancel-001","approved":true}`，确认本地订单状态更新且产生审计记录。
+5. 执行 `GET /agent/verify-cancel-001/audit`，核对actor、thread、action、result和request_id。
 
-```text
-username=admin
-password=<password>
-```
-
-后续请求携带：
-
-```text
-Authorization: Bearer <access_token>
-```
+该批准操作只更新本地PostgreSQL模拟业务表，不连接企业ERP、支付或仓储系统。重复验证前应使用新的待处理订单或重置本地测试数据。
 
 ## API
 
@@ -149,6 +144,32 @@ Authorization: Bearer <access_token>
 | `POST` | `/agent/run` | operator | 运行 Agent 或生成待确认草稿 |
 | `POST` | `/agent/confirm` | operator | 批准或拒绝自己的草稿 |
 | `GET` | `/agent/{thread_id}/audit` | operator | 查看授权范围内的线程审计 |
+
+Mock模式实际请求：
+
+```json
+{"question": "差旅报销需要准备哪些材料？", "top_k": 3}
+```
+
+实际响应字段摘录（答案正文中间部分用省略号缩短）：
+
+```json
+{
+  "answer": "根据知识库中与‘差旅报销需要准备哪些材料？’最相关的资料……[资料 1]",
+  "sources": [
+    {
+      "citation_id": 1,
+      "filename": "员工报销制度.txt",
+      "file_type": "txt",
+      "page_number": null,
+      "section": null
+    }
+  ],
+  "is_refused": false
+}
+```
+
+同次实际运行导入3份样例文档；完整响应还包含检索片段、分数和Prompt。动态文档ID、分块ID和请求ID不写入README。
 
 ## 多格式文档入库
 
@@ -254,6 +275,29 @@ $env:RUN_REAL_INTEGRATION='1'
   ../.venv/Scripts/python.exe -m unittest `
   tests.test_real_integration tests.test_m2_real_eval tests.test_m3_real_agent -v
 ```
+
+## 持续集成
+
+`.github/workflows/ci.yml` 在push、pull request和手动触发时使用Python 3.12运行：
+
+- 普通 `unittest` 测试；
+- 免费Mock Eval；
+- `pip check` 依赖一致性检查；
+- 跟踪文件中的`.env`、私钥、JWT、常见API密钥格式和本机绝对路径扫描。
+
+工作流不读取仓库Secret、不调用付费模型，`GITHUB_TOKEN`只有 `contents: read` 权限。本地可运行相同仓库检查：
+
+```powershell
+python scripts/check_repository.py
+```
+
+## 完成范围与上线前缺口
+
+| 状态 | 内容 |
+|---|---|
+| 已完成 | TXT/PDF/DOCX入库、来源追踪、混合检索/Rerank、拒答与引用校验、单Agent工具调用、人工确认、PostgreSQL状态/审计、JWT/RBAC、Eval、Docker和CI |
+| 未实现 | OCR、多模态解析、复杂前端、多Agent、企业OIDC、真实ERP/支付/仓储接入、Redis/Kafka/Kubernetes、云服务器部署 |
+| 公网生产前补充 | HTTPS与可信网关、登录限流、密钥托管和轮换、数据库备份恢复、集中日志/指标/告警、容量压测、依赖与镜像漏洞治理 |
 
 ## 数据与安全边界
 

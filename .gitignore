@@ -11,3 +11,4 @@ htmlcov/
 .idea/
 .vscode/
 work/
+.playwright-cli/

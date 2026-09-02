@@ -6,6 +6,25 @@
 
 ## RAG 数据流
 
+```mermaid
+flowchart LR
+    A[JSON / TXT / PDF / DOCX] --> B[解析与来源元数据]
+    B --> C[清洗与中文分块]
+    C --> D[百炼 Embedding]
+    D --> E[(PostgreSQL + pgvector)]
+    Q[用户问题] --> V[向量召回]
+    Q --> K[pg_trgm 关键词召回]
+    E --> V
+    E --> K
+    V --> F[RRF 融合]
+    K --> F
+    F --> R[qwen3-rerank]
+    R --> T{相关度阈值}
+    T -->|不足| X[明确拒答]
+    T -->|通过| L[DeepSeek 基于资料回答]
+    L --> CITE[引用编号校验与来源返回]
+```
+
 1. 文本 JSON 或 TXT、PDF、DOCX 文件进入 FastAPI 文档接口。
 2. PDF 按页、DOCX 按标题/段落提取文字；文本经过清洗和中文分块，生成稳定的内容哈希。
 3. 百炼 Embedding 将分块转换为向量并写入 PostgreSQL+pgvector。
@@ -17,6 +36,25 @@
 `documents` 保存文件类型和内容哈希；`rag_chunks` 保存文件名、文件类型、页码或章节/段落位置。检索、Rerank 和回答接口沿用同一份来源元数据。扫描版 PDF 在入库边界被拒绝，不进入空分块或向量表。
 
 ## Agent 数据流
+
+```mermaid
+flowchart TD
+    A[Bearer JWT 请求] --> B[FastAPI RBAC]
+    B --> C[LangGraph StateGraph]
+    C --> D{模型选择工具}
+    D --> K[knowledge_search]
+    D --> O[get_order]
+    D --> I[get_inventory]
+    D --> X[draft_order_cancellation]
+    K --> C
+    O --> C
+    I --> C
+    X --> H[interrupt 暂停并保存检查点]
+    H --> P{原线程用户确认}
+    P -->|拒绝| N[不写业务表并记录审计]
+    P -->|批准| TX[单事务: 校验/更新订单/取消记录/审计]
+    TX --> DB[(PostgreSQL)]
+```
 
 LangGraph `StateGraph` 负责模型与工具之间的状态流转。当前工具包括：
 

@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import json
 import logging
+import os
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -40,6 +41,10 @@ auth_service = AuthService(
     settings.jwt_audience,
     settings.jwt_expire_minutes,
 )
+if settings.rag_mode == "mock" and os.getenv("MOCK_ADMIN_PASSWORD"):
+    auth_service.create_user(
+        "mock-admin", os.environ["MOCK_ADMIN_PASSWORD"], "admin"
+    )
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 if settings.rag_mode == "real":
     from .services.dashscope_embedding_service import DashScopeEmbeddingService

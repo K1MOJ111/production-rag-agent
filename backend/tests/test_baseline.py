@@ -1,8 +1,11 @@
+import os
 import unittest
 from datetime import timedelta
 from uuid import UUID
 
 from fastapi.testclient import TestClient
+
+os.environ.setdefault("MOCK_ADMIN_PASSWORD", "mock-admin-only-123!")
 
 from app.main import app, auth_service
 from app.services.chunk_service import clean_text, split_into_chunks
@@ -114,6 +117,18 @@ class BaselineApiTest(unittest.TestCase):
             ).status_code,
             401,
         )
+
+    def test_mock_bootstrap_admin_can_authenticate(self) -> None:
+        response = self.client.post(
+            "/auth/token",
+            data={
+                "username": "mock-admin",
+                "password": "mock-admin-only-123!",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["token_type"], "bearer")
 
     def test_invalid_expired_and_forged_tokens_return_401(self) -> None:
         expired = auth_service.create_access_token(
